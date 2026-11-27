@@ -39,7 +39,7 @@ v0.1.0 in preparation — see [`docs/RELEASE_NOTES_v0.1.0.md`](docs/RELEASE_NOTE
 
 ## Rules source
 
-Rules live in [irfanzahoor/frappe_core_skills](https://github.com/irfanzahoor/frappe_core_skills) (v2.3.0, 22 skills) for FR-001 to FR-035, and FR-036 to FR-043 come from the [Impertio-Studio/Frappe_Claude_Skill_Package](https://github.com/Impertio-Studio/Frappe_Claude_Skill_Package) review (61 skills) — rule ideas only, written in our own wording, because that package's licence is inconsistent (README/package.json say MIT, LICENSE.md is LGPL v3). This tool does not run your code — it only reads it, in your browser, and nothing is stored.
+Rules live in [irfanzahoor/frappe_core_skills](https://github.com/irfanzahoor/frappe_core_skills) (v2.4.0, 23 skills) for FR-001 to FR-035, and FR-036 to FR-043 come from the [Impertio-Studio/Frappe_Claude_Skill_Package](https://github.com/Impertio-Studio/Frappe_Claude_Skill_Package) review (61 skills) — rule ideas only, written in our own wording, because that package's licence is inconsistent (README/package.json say MIT, LICENSE.md is LGPL v3). This tool does not run your code — it only reads it, in your browser, and nothing is stored.
 
 ## License
 

@@ -395,7 +395,7 @@ function reportMarkdown() {
   for (const f of lastResult.findings) {
     lines.push(`| ${f.severity} | ${f.file}:${f.line} | ${f.ruleId} ${f.rule} | ${f.fix} |`);
   }
-  lines.push('', 'Rules from frappe_core_skills v2.3.0 — 79 checks.');
+  lines.push('', 'Rules from frappe_core_skills v2.4.0 — 79 checks.');
   return lines.join('\n');
 }
 // --- Report export --------------------------------------------------------
