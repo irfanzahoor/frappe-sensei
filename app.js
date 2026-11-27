@@ -250,6 +250,8 @@ function renderResults(result, files, elapsedMs) {
     return `<span class="chip ${key}">${key}: ${n}</span>`;
   }).join('');
   renderFindings();
+  // Keep an open report box in sync with the latest run instead of showing the previous run's report.
+  if (!$('report-box').hidden) $('report-text').value = reportMarkdown();
   section.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 function renderFindings() {
