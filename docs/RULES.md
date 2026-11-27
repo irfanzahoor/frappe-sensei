@@ -87,7 +87,10 @@ check anywhere in its call chain still fires:
   the helper files are included.
 - **FR-013:** creating a document no longer fires. A dict first
   argument (`frappe.get_doc({...})`) or `.insert()` / `.save()` after
-  the call means the document is being made, not read.
+  the call means the document is being made, not read. Narrowed again
+  2026-11-27: FR-013 now fires only on a plain field access (`.field`
+  or `["field"]`); a method call after `get_doc` (`.set_status()`,
+  `.save()`, `.insert()`, `.submit()`) does not fire.
 - **FR-031:** fires on `.save()` / `.submit()` inside a loop only.
   `.insert()` inside a loop is bulk creation and no longer fires.
 - **FR-030 / FR-031:** neither fires in demo, seed or test files

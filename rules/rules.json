@@ -213,7 +213,7 @@
       "example_good": "group = frappe.db.get_value('Item', row.item_code, 'item_group')",
       "fix": "Use frappe.db.get_value or frappe.get_cached_value for single fields.",
       "id": "FR-013",
-      "pattern": "Python AST check: frappe.get_doc(<doctype>, <name>) followed by attribute access to a single field, with no other use of the document. Creating a document does not fire: a dict first argument (creation form) or .insert() / .save() after the call means the document is being made, not read.",
+      "pattern": "Python AST check: frappe.get_doc(<doctype>, <name>) followed by a plain field access (.field or [\"field\"]), with no other use of the document. A method call after get_doc (.set_status(), .save(), .insert(), .submit()) does not fire — that is an action on the document, not a single-field read. Creating a document does not fire: a dict first argument (creation form) means the document is being made, not read.",
       "severity": "major",
       "source": "skills/frappe-core/SKILL.md",
       "title": "get_doc used for a single field",

@@ -330,16 +330,32 @@ export function checkFiles(files, rulesInput) {
         // (good form is {0} + .format()). _() with {0} must not flag.
         if (/_\s*\(\s*f['"]/.test(line) || /_\s*\(\s*['"][^'"]*\{[A-Za-z_][A-Za-z0-9_]*\}/.test(line)) add('FR-010', path, i);
         if (/^\s*print\s*\(/.test(line)) add('FR-011', path, i);
-        // FR-013: get_doc(...) followed by a single-field access. Creating
-        // a document is NOT a single-field read: a dict first argument
-        // (creation form) or .insert() / .save() after the call means the
-        // document is being made, not read.
+        // FR-013: get_doc(...) followed by a single-field access.
+        // Fires ONLY on a plain field access (.field or ["field"]).
+        // A method call after get_doc (.set_status(), .save(), .insert())
+        // is an action on the document, not a single-field read.
+        // Creating a document is NOT a single-field read either: a dict
+        // first argument (creation form) means the document is being
+        // made, not read.
         {
-          const gm = /frappe\.get_doc\(\s*(\{)?[^)]*\)\s*\.(\w+)/.exec(line);
-          if (gm) {
-            const isCreationForm = !!gm[1];
-            const attr = gm[2];
-            if (!isCreationForm && !/^(insert|save|submit)$/.test(attr)) add('FR-013', path, i);
+          const start = line.indexOf('frappe.get_doc(');
+          if (start !== -1) {
+            const open = line.indexOf('(', start);
+            const afterOpen = line.slice(open + 1).trimStart();
+            const isCreationForm = afterOpen.startsWith('{');
+            // Scan to the matching close paren (handles nested calls).
+            let depth = 0;
+            let close = -1;
+            for (let k = open; k < line.length; k++) {
+              if (line[k] === '(') depth++;
+              else if (line[k] === ')') { depth--; if (depth === 0) { close = k; break; } }
+            }
+            if (close !== -1 && !isCreationForm) {
+              const rest = line.slice(close + 1).trimStart();
+              const methodCall = /^\.\w+\s*\(/.test(rest);
+              const fieldAccess = /^\.\w+(?!\s*\()/.test(rest) || /^\[\s*['"]/.test(rest);
+              if (fieldAccess && !methodCall) add('FR-013', path, i);
+            }
           }
         }
         if (/frappe\.get_(all|list)\s*\([^)]*fields\s*=\s*(?:\[\s*['"]\*['"]\s*\]|['"]\*['"])/.test(line)) add('FR-014', path, i);

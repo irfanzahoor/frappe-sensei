@@ -204,6 +204,21 @@ for (const rule of rulesData.rules) {
       id: 'FR-013', shouldHave: true,
     },
     {
+      name: 'FR-013 (c) get_doc("Doctype", name).set_status() method call does not fire',
+      files: [{ path: 'sales_order.py', content: 'frappe.get_doc("Quotation", quotation).set_status(update=True)\n' }],
+      id: 'FR-013', shouldHave: false,
+    },
+    {
+      name: 'FR-013 (d) get_doc("Doctype", name)["field"] bracket field access still fires',
+      files: [{ path: 'sales_order.py', content: 'group = frappe.get_doc("Item", row.item_code)["item_group"]\n' }],
+      id: 'FR-013', shouldHave: true,
+    },
+    {
+      name: 'FR-013 (e) get_doc("Doctype", name).save() method call does not fire',
+      files: [{ path: 'sales_order.py', content: 'frappe.get_doc("Sales Order", name).save()\n' }],
+      id: 'FR-013', shouldHave: false,
+    },
+    {
       name: 'FR-031 (a) .insert() inside a loop does not fire (bulk creation, not update)',
       files: [{ path: 'demo/importer.py', content: 'for name in names:\n    doc = frappe.get_doc({"doctype": "Item", "item_code": name})\n    doc.insert()\n' }],
       id: 'FR-031', shouldHave: false,

@@ -1,0 +1,96 @@
+# Frappe Sensei v0.1.0 — Release Notes
+
+**Status: prepared, not yet tagged.** The v0.1.0 tag goes on after the live-site test
+(paste / GitHub tab / Copy on https://irfanzahoor.github.io/frappe-sensei/),
+once GitHub Pages is enabled.
+
+## What it is
+
+A live web tool that reviews Frappe / ERPNext code against the
+`frappe_core_skills` rules — the same report the `/frappe-review` command
+gives, in the browser, with no login and no backend.
+
+Paste code, upload `.py` / `.js` files, or give a public GitHub link, and
+get a verdict (approve / approve with fixes / needs rework), a
+severity-ordered findings table (blocker / major / minor), and a report
+you can copy or download as Markdown.
+
+Live URL: **https://irfanzahoor.github.io/frappe-sensei/**
+(goes live once GitHub Pages is enabled: Settings → Pages → Deploy from
+a branch → `main` / root).
+
+## 35 checks, 5 categories
+
+Placement (7), Framework APIs (10), Server vs Client (4), Security (7),
+Performance (7) — derived from `frappe_core_skills` v2.3.0 (22 skills).
+Full list: [`docs/RULES.md`](RULES.md).
+
+## What changed since the first build
+
+### Fix round 1 — FR-023 and FR-032 narrowed (2026-11-27)
+
+- **FR-023** no longer flags whitelisted methods inside a DocType
+  controller class (`self` methods, including `*Controller` bases such
+  as `SellingController`), unless they fetch another document by a
+  passed-in name. `check_permission` and `only_has_select_perm` now
+  count as permission checks.
+- **FR-032** fires only when the iterable is a direct `get_all` /
+  `get_list` / `db.sql` call, or a variable assigned from one — not on
+  child-table rows already in memory.
+- ERPNext `sales_order.py`: 19 findings → 9.
+
+### Fix round 2 — Copy button and FMC false positives (2026-11-27)
+
+Running the tool on FMC (`irfanzahoor/fmc`, 6 files) gave 50 findings:
+8 blocker FR-023, 41 major, 1 minor. Verification showed they were
+almost all false positives:
+
+- **FR-023** now follows a permission check into a helper the
+  whitelisted method calls — directly or transitively (up to 4 levels,
+  across files in the same submission, alias-aware) — and exempts a
+  function that only reads `frappe.get_roles()` with no DB access.
+- **FR-013** no longer fires on a document-creation form
+  (`frappe.get_doc({...}).insert()`).
+- **FR-031** fires on `.save()` / `.submit()` in a loop only, not on
+  `.insert()` (bulk creation).
+- **FR-030 / FR-031** are skipped in demo / seed / test files.
+- **`# noqa`** on a line suppresses the finding, for every rule.
+- FMC 6 files: 50 findings → 4 (the 4 whose helper files were not in
+  that submission; 0 when the whole repo is checked).
+- **Copy button:** 3-step fallback — clipboard API, then a hidden
+  textarea, then a visible report textbox with a Select-all button.
+  "Copied" is shown only when a copy actually succeeded, plus a
+  "Show report" button for a manual copy at any time.
+
+### Fix round 3 — FR-013 method calls (2026-11-27)
+
+- **FR-013** now fires only on a plain field access (`.field` or
+  `["field"]`). A method call after `get_doc` (`.set_status()`,
+  `.save()`, `.insert()`, `.submit()`) is an action on the document,
+  not a single-field read, and no longer fires.
+- ERPNext `sales_order.py`: 9 findings → 8 (the FR-013 on
+  `get_doc("Quotation", quotation).set_status(update=True)` is gone;
+  the FR-030 N+1 on the same line stays, correctly).
+
+## Tests
+
+65 checker tests passing, 0 failing (35 rules bad+good, 3 verdict
+checks, 27 regression tests). Run: `node checker/checker.test.mjs`.
+
+## Honest remaining gaps
+
+- **GitHub Pages is not enabled yet.** The live URL above returns 404
+  until the owner enables it. No tag until the live site is tested.
+- **GitHub tab has never been tested live end-to-end** — the
+  unauthenticated GitHub API quota (60/hour) was exhausted during
+  development. Retry on `irfanzahoor/fmc` from the live site.
+- **Copy / Download buttons have never had a real browser click test**
+  — no browser is available on the build machine. Confirm on the live
+  site in a real browser.
+- **Bad/good paste examples** were verified by driving the checker in
+  Node, not by clicking through in a browser.
+- A whitelisted method whose permission check lives in a helper file
+  that was not submitted still flags — check the whole app when a
+  blocker looks wrong.
+- FR-007 (Custom Field not a fixture) can still false-positive on a
+  comment that merely talks about custom fields.

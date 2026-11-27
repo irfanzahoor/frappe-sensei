@@ -115,10 +115,15 @@ any failure.
   (Narrowed again 2026-11-27: the old version flagged all 8 FMC API
   wrappers, each of which delegates to a helper that checks
   permission.)
-- **FR-013 (get_doc for a single field):** creating a document does
-  not fire. A dict first argument (`frappe.get_doc({...})`) or
-  `.insert()` / `.save()` after the call means the document is being
-  made, not read. `frappe.get_doc("Doctype", name).field` still fires.
+- **FR-013 (get_doc for a single field):** fires only on a plain field
+  access (`.field` or `["field"]`). A method call after `get_doc`
+  (`.set_status()`, `.save()`, `.insert()`, `.submit()`) is an action
+  on the document, not a single-field read, and does not fire.
+  Creating a document does not fire either: a dict first argument
+  (`frappe.get_doc({...})`) means the document is being made, not
+  read. (Narrowed again 2026-11-27: `get_doc("Quotation",
+  quotation).set_status(update=True)` in ERPNext `sales_order.py`
+  used to flag.)
 - **FR-031 (bulk update doc-by-doc):** fires on `.save()` /
   `.submit()` inside a loop only. `.insert()` inside a loop is bulk
   creation (demo data, imports) and does not fire.
