@@ -2,7 +2,7 @@
 
 **Live tool: https://irfanzahoor.github.io/frappe-sensei/**
 
-> The link goes live once GitHub Pages is enabled (Settings → Pages → Deploy from a branch → `main` / root). Until then, run it locally — see below.
+> Live now. You can also run it locally — see below.
 
 Live web tool that reviews Frappe / ERPNext code against the `frappe_core_skills` rules.
 
@@ -17,7 +17,7 @@ Paste code, upload a `.py` / `.js` file, or give a public GitHub link — and ge
 
 ## How to use
 
-1. Open the live link above (once Pages is on), or run it locally:
+1. Open the live link above, or run it locally:
    ```text
    git clone https://github.com/irfanzahoor/frappe-sensei.git
    cd frappe-sensei
@@ -29,7 +29,7 @@ Paste code, upload a `.py` / `.js` file, or give a public GitHub link — and ge
 
 ## Status
 
-v0.1.0 in preparation — see [`docs/RELEASE_NOTES_v0.1.0.md`](docs/RELEASE_NOTES_v0.1.0.md). 84 checker tests passing, 0 failing.
+v0.1.0 released — see [`docs/RELEASE_NOTES_v0.1.0.md`](docs/RELEASE_NOTES_v0.1.0.md) and the [release](https://github.com/irfanzahoor/frappe-sensei/releases/tag/v0.1.0). 236 checker tests passing, 0 failing.
 
 ## Known limitations
 
