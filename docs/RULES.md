@@ -95,7 +95,7 @@ The official [frappe/skills](https://github.com/frappe/skills) review (12 skills
 - **FR-058 (major):** a raw-SQL `UPDATE` / `INSERT` / `DELETE` via `frappe.db.sql` with no `frappe.clear_document_cache` / `frappe.clear_cache` in the same function. `set_value` / `save` clear the cache themselves, so they never reach this check. A `SELECT` does not fire.
 - **FR-059 (major):** `frappe.set_user(` without restoration in a `finally` block that calls `set_user(` again, or `frappe.session.user = ...` assignment.
 
-None of the 16 new rules fires on ERPNext `sales_order.py` (still 8 findings) or on the 6 FMC files (still 4 findings, the known FR-023 cross-file delegates) — both re-runs were done before pushing. Tests: 147 passed, 0 failed (59 rules bad+good, 3 verdict, 38 earlier regression, 44 new regression for FR-040 and FR-044–FR-059).
+None of the 16 new rules fires on ERPNext `sales_order.py` (still 8 findings) or on the 6 FMC files (still 4 findings, the known FR-023 cross-file delegates) — both re-runs were done before pushing. Tests: 147 passed, 0 failed (59 rules bad+good, 3 verdict, 38 earlier regression, 47 new regression for FR-040 and FR-044–FR-059).
 
 ## Rule changes — 8 new rules from the Impertio review (2026-11-27)
 

@@ -87,7 +87,7 @@ only, written in our own wording). Full list: [`docs/RULES.md`](RULES.md).
 - None of the 16 new rules fires on ERPNext `sales_order.py` (still 8
   findings) or on the 6 FMC files (still 4, the known FR-023
   cross-file delegates). Tests: 147 passed, 0 failed (59 rules
-  bad+good, 3 verdict, 38 earlier regression, 44 new regression).
+  bad+good, 3 verdict, 38 earlier regression, 47 new regression).
 - **Live site note:** the live site at
   https://irfanzahoor.github.io/frappe-sensei/ still serves the
   v0.1.0 build (Pages has not rebuilt since 0f17cf5 — API pushes do
