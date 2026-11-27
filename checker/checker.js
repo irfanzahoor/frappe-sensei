@@ -83,26 +83,67 @@ function enclosingJsHandler(lines, idx) {
   return null;
 }
 
-// --- Python helper: parse top-level defs with decorators -----------------
-// Returns [{ name, line (0-based), decorator, bodyLines: [{line, text}] }]
+// --- Python helper: parse defs with decorators, class + params --------
+// Returns [{ name, line (0-based), decorator, bodyLines: [{line, text}],
+//   params: [first, ...], className, classBases, isDocumentClass }]
+// A def inside `class X(Document):` has isDocumentClass true when the
+// class bases mention Document. Header lines of a multi-line def are
+// collected so params are parsed correctly and are not in the body.
 function parsePyFunctions(lines) {
   const fns = [];
   let pendingDecorator = '';
+  const classStack = []; // { name, bases, indent }
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const dec = /^\s*@([^\n]+)/.exec(line);
     if (dec) { pendingDecorator = dec[1].trim(); continue; }
+    const cm = /^(\s*)class\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?\s*:/.exec(line);
+    if (cm) {
+      const ind = cm[1].length;
+      while (classStack.length && classStack[classStack.length - 1].indent >= ind) classStack.pop();
+      classStack.push({ name: cm[2], bases: cm[3] || '', indent: ind });
+      pendingDecorator = '';
+      continue;
+    }
     const m = /^(\s*)def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(line);
     if (!m) { if (line.trim() && !line.trim().startsWith('#')) pendingDecorator = ''; continue; }
     const defIndent = m[1].length;
-    const body = [];
-    for (let j = i + 1; j < lines.length; j++) {
-      const b = lines[j];
-      if (b.trim() === '' || isCommentPy(b)) { body.push({ line: j, text: b }); continue; }
-      if (indentOf(b) <= defIndent) break;
-      body.push({ line: j, text: b });
+    let cls = null;
+    for (let k = classStack.length - 1; k >= 0; k--) {
+      if (classStack[k].indent < defIndent) { cls = classStack[k]; break; }
     }
-    fns.push({ name: m[2], line: i, decorator: pendingDecorator, bodyLines: body });
+    // Collect the def header (it may span lines) to parse params.
+    let header = line;
+    let j = i;
+    let depth = (header.match(/\(/g) || []).length - (header.match(/\)/g) || []).length;
+    while (depth > 0 && j + 1 < lines.length) {
+      j++;
+      header += '\n' + lines[j];
+      depth += (lines[j].match(/\(/g) || []).length - (lines[j].match(/\)/g) || []).length;
+    }
+    const paramsText = header.slice(header.indexOf('(') + 1, header.lastIndexOf(')'));
+    const params = paramsText.split(',').map((p) => p.trim().split(/[:=]/)[0].trim()).filter(Boolean);
+    const body = [];
+    for (let k = j + 1; k < lines.length; k++) {
+      const b = lines[k];
+      if (b.trim() === '' || isCommentPy(b)) { body.push({ line: k, text: b }); continue; }
+      if (indentOf(b) <= defIndent) break;
+      body.push({ line: k, text: b });
+    }
+    fns.push({
+      name: m[2],
+      line: i,
+      decorator: pendingDecorator,
+      bodyLines: body,
+      params,
+      className: cls ? cls.name : null,
+      classBases: cls ? cls.bases : '',
+      // A DocType controller class inherits from Document directly, or
+      // through an ERPNext controller base (SellingController,
+      // BuyingController, TransactionController, ...), which themselves
+      // inherit from Document. A bare `class Foo:` is not one.
+      isDocumentClass: cls ? /\b(Document|WebsiteGenerator|[A-Za-z_][A-Za-z0-9_]*Controller)\b/.test(cls.bases) : false,
+    });
     pendingDecorator = '';
   }
   return fns;
@@ -251,15 +292,43 @@ export function checkFiles(files, rulesInput) {
           }
         }
       }
-      // FR-032: sum()/len() over a get_all/get_list result, in Python.
+      // FR-032: sum()/len() over a DB-query result ONLY. The iterable must
+      // be a direct get_all/get_list/db.sql call inside the sum()/len(),
+      // or a variable assigned from such a call earlier in the same file.
+      // In-memory iterables (self.get(...), self.items, doc.items, a plain
+      // list, or a list built from self.get(...)) must NOT fire.
       {
-        const hasBulkFetch = /frappe\.get_(all|list)\s*\(/.test(content);
-        if (hasBulkFetch) {
-          for (let i = 0; i < lines.length; i++) {
-            if (isCommentPy(lines[i])) continue;
-            const noStrings = stripStrings(lines[i]);
-            if (/\bsum\s*\(/.test(noStrings) || /\blen\s*\(\s*[A-Za-z_]/.test(noStrings)) add('FR-032', path, i);
+        const dbVars = new Map(); // varName -> line index of assignment
+        const DB_ASSIGN_RE = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[^#]*\b(?:frappe\.(?:get_all|get_list|db\.sql|db\.get_all))\s*\(/;
+        for (let i = 0; i < lines.length; i++) {
+          const m = DB_ASSIGN_RE.exec(lines[i]);
+          if (m && !dbVars.has(m[1])) dbVars.set(m[1], i);
+        }
+        for (let i = 0; i < lines.length; i++) {
+          const stripped = stripStrings(lines[i]);
+          if (!/\b(?:sum|len)\s*\(/.test(stripped)) continue;
+          // Join continuation lines until the call's parens balance.
+          let callText = stripped;
+          let depth = (stripped.match(/\(/g) || []).length - (stripped.match(/\)/g) || []).length;
+          let k = i;
+          while (depth > 0 && k + 1 < lines.length && k - i < 5) {
+            k++;
+            const next = stripStrings(lines[k]);
+            callText += '\n' + next;
+            depth += (next.match(/\(/g) || []).length - (next.match(/\)/g) || []).length;
           }
+          // Direct DB call inside sum()/len().
+          if (/frappe\.(?:get_all|get_list|db\.sql|db\.get_all)\s*\(/.test(callText)) { add('FR-032', path, i); continue; }
+          // Iterable variable: `for x in <iter>` in a generator, else the
+          // first argument of sum()/len().
+          let iter = null;
+          const forIn = /for\s+[A-Za-z_][A-Za-z0-9_]*\s+in\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(callText);
+          if (forIn) iter = forIn[1];
+          else {
+            const arg = /(?:sum|len)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(callText);
+            if (arg) iter = arg[1];
+          }
+          if (iter && dbVars.has(iter) && dbVars.get(iter) < i) add('FR-032', path, i);
         }
       }
       // FR-023 / FR-024 / FR-033 — per whitelisted function.
@@ -271,10 +340,28 @@ export function checkFiles(files, rulesInput) {
           const isGuest = /allow_guest\s*=\s*True/.test(fn.decorator);
           const bodyText = fn.bodyLines.map((b) => b.text).join('\n');
           if (isWhitelisted && !isGuest) {
-            // FR-023: no permission check before return/write.
-            if (!/has_permission|get_list\s*\(/.test(bodyText)) {
+            // FR-023: no permission check before return/write. A permission
+            // check is has_permission, check_permission (call or
+            // check_permission= argument), only_has_select/write_perm, or a
+            // permission-aware get_list(). Instance methods of a DocType
+            // controller class (first arg self, inside a class inheriting
+            // from Document) are exempt — the document permission context
+            // already applies — UNLESS the method fetches another document
+            // by a passed-in docname/id with no permission check.
+            const hasPermCheck = /has_permission|check_permission|only_has_(?:select|write|perm)|get_list\s*\(/.test(bodyText);
+            if (!hasPermCheck) {
+              const firstParam = (fn.params && fn.params[0]) || '';
+              const isDocumentSelfMethod = !!fn.isDocumentClass && firstParam === 'self';
+              let riskyFetch = false;
+              if (isDocumentSelfMethod) {
+                const otherParams = (fn.params || []).slice(1);
+                const fetchRe = /frappe\.(?:get_doc|db\.get_value|db\.get_all|get_all|get_list|db\.sql)\s*\(/;
+                if (otherParams.length && fetchRe.test(bodyText)) {
+                  riskyFetch = otherParams.some((p) => new RegExp('\\b' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(bodyText));
+                }
+              }
               // A read-only function that only returns a constant is exempt.
-              if (!/^\s*return\s*\{/.test(bodyText)) add('FR-023', path, fn.line);
+              if ((!isDocumentSelfMethod || riskyFetch) && !/^\s*return\s*\{/.test(bodyText)) add('FR-023', path, fn.line);
             }
           }
           if (isWhitelisted && isGuest) {

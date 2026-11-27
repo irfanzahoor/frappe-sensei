@@ -46,6 +46,26 @@ Severity follows `agents/frappe-reviewer.md`: **blocker** = wrong placement, JS-
 | FR-034 | minor | performance | Master data read without caching | skills/frappe-performance/SKILL.md |
 | FR-035 | minor | performance | Name-only list fetched without pluck | skills/frappe-performance/SKILL.md |
 
+## Rule changes — FR-023 and FR-032 narrowed (2026-11-27)
+
+Day 8 testing on ERPNext core `sales_order.py` showed both rules were
+over-broad, so their `pattern` fields in `rules/rules.json` were narrowed.
+Severity, title and fix text are unchanged for both rules.
+
+- **FR-023:** instance methods of a DocType controller class (first
+  argument `self`, inside a class inheriting from `Document` directly
+  or through a `*Controller` base such as `SellingController`) are now
+  exempt, unless they fetch another document by a passed-in docname/id
+  with no permission check. `check_permission` (call or
+  `check_permission=` argument) and `only_has_select/write_perm` now
+  also count as permission checks, alongside `has_permission` and
+  `get_list`.
+- **FR-032:** now fires only when the summed/counted iterable comes
+  from a DB query — a direct `get_all` / `get_list` / `db.sql` call
+  inside `sum()` / `len()`, or a variable assigned from such a call
+  earlier in the same file. Sums over `self.get(...)`, `self.items` or
+  a plain list no longer fire.
+
 ## Out of scope for Phase 1
 
 These were read in the v2.3.0 skills but are **not** in these 35 rules, because they are not deterministic static code checks:

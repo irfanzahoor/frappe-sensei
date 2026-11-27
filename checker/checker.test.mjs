@@ -100,6 +100,68 @@ for (const rule of rulesData.rules) {
   }
 }
 
+// Regression tests for the FR-023 / FR-032 narrowing (2026-11-27).
+// Each entry: a constructed file set, the rule, and whether it must fire.
+{
+  const regression = [
+    {
+      name: 'FR-023 (a) Document controller self-method is exempt',
+      files: [{ path: 'sales_order/sales_order.py', content: 'from frappe.model.document import Document\n\nclass SalesOrder(Document):\n    @frappe.whitelist()\n    def has_unreserved_stock(self, table_name="items"):\n        return SalesOrderStockReservation(self).has_unreserved_stock(table_name)\n' }],
+      id: 'FR-023', shouldHave: false,
+    },
+    {
+      name: 'FR-023 (a2) ERPNext controller base (SellingController) self-method is exempt',
+      files: [{ path: 'sales_order/sales_order.py', content: 'from erpnext.controllers.selling_controller import SellingController\n\nclass SalesOrder(SellingController):\n    @frappe.whitelist()\n    def has_unreserved_stock(self, table_name="items"):\n        return SalesOrderStockReservation(self).has_unreserved_stock(table_name)\n' }],
+      id: 'FR-023', shouldHave: false,
+    },
+    {
+      name: 'FR-023 (b) standalone whitelisted function without a check still fires',
+      files: [{ path: 'sales_order.py', content: "@frappe.whitelist()\ndef get_order_total(name):\n    return frappe.get_doc('Sales Order', name).grand_total\n" }],
+      id: 'FR-023', shouldHave: true,
+    },
+    {
+      name: 'FR-023 (b2) Document self-method fetching another doc by param still fires',
+      files: [{ path: 'sales_order/sales_order.py', content: 'from frappe.model.document import Document\n\nclass SalesOrder(Document):\n    @frappe.whitelist()\n    def get_other(self, name):\n        return frappe.get_doc("Sales Order", name).grand_total\n' }],
+      id: 'FR-023', shouldHave: true,
+    },
+    {
+      name: 'FR-023 (b3) standalone function that does check_permission does not fire',
+      files: [{ path: 'sales_order.py', content: '@frappe.whitelist()\ndef get_work_order_items(sales_order):\n    so = frappe.get_doc("Sales Order", sales_order)\n    so.check_permission("read")\n    return so.items\n' }],
+      id: 'FR-023', shouldHave: false,
+    },
+    {
+      name: 'FR-032 (c) sum over self.get("items") does not fire, even with get_all elsewhere in the file',
+      files: [{ path: 'sales_order.py', content: 'def set_delivery_progress(self):\n    bins = frappe.get_all("Bin", filters={"item_code": "X"}, fields=["actual_qty"])\n    deliverable = [d for d in self.get("items") if not cint(d.skip_delivery)]\n    total_qty = sum(abs(flt(d.qty)) for d in deliverable)\n    delivered_qty = sum(min(abs(flt(d.delivered_qty)), abs(flt(d.qty))) for d in deliverable)\n' }],
+      id: 'FR-032', shouldHave: false,
+    },
+    {
+      name: 'FR-032 (d1) sum over a variable assigned from get_all still fires',
+      files: [{ path: 'sales_order.py', content: "rows = frappe.get_all('Sales Invoice', fields=['grand_total'])\ntotal = sum(r.grand_total for r in rows)\n" }],
+      id: 'FR-032', shouldHave: true,
+    },
+    {
+      name: 'FR-032 (d2) sum directly over frappe.get_all still fires',
+      files: [{ path: 'sales_order.py', content: 'total = sum(d.amount for d in frappe.get_all("Item", fields=["amount"]))\n' }],
+      id: 'FR-032', shouldHave: true,
+    },
+    {
+      name: 'FR-032 (d3) len() over a variable assigned from get_list still fires',
+      files: [{ path: 'sales_order.py', content: 'rows = frappe.get_list("Item", fields=["name"])\ncount = len(rows)\n' }],
+      id: 'FR-032', shouldHave: true,
+    },
+  ];
+  for (const t of regression) {
+    const result = checkFiles(t.files, rulesData);
+    const ok = has(result, t.id) === t.shouldHave;
+    if (ok) { passed++; console.log(`PASS ${t.name}`); }
+    else {
+      failed++;
+      failures.push(`${t.name}: expected FR-032/FR-023 ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
+      console.log(`FAIL ${t.name}: expected ${t.id} ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
+    }
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed, ${rulesData.rules.length} rules.`);
 if (failed) {
   console.log('Failures:');

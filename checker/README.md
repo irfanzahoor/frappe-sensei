@@ -93,13 +93,30 @@ any failure.
 - **FR-023 (whitelisted method without a permission check):**
   `allow_guest=True` methods are exempt — a truly public read-only
   endpoint needs no permission check. A `get_list` call counts as a
-  permission-aware read.
+  permission-aware read, and so do `has_permission`, `check_permission`
+  (call or `check_permission=` argument) and `only_has_select/write_perm`.
+  Instance methods of a DocType controller class (first argument `self`,
+  inside a class inheriting from `Document` directly or through a
+  `*Controller` base such as `SellingController`) are exempt, because the
+  document permission context already applies — unless the method fetches
+  another document by a passed-in docname/id with no permission check, in
+  which case it still fires. Standalone module-level whitelisted
+  functions are never exempt. (Narrowed 2026-11-27: the old version
+  flagged controller `self` methods such as `has_unreserved_stock` in
+  ERPNext `sales_order.py`.)
 - **FR-030 / FR-031 (loop detection):** loops are tracked by Python
   indentation, not a full AST. Unusual formatting (one-line loops,
   semicolons) can be missed.
-- **FR-032 (aggregation in Python):** flags `sum(` / `len(` outside
-  string literals in a file that also calls `get_all` / `get_list`.
-  SQL-side aggregation (`select sum(...)`) is not flagged.
+- **FR-032 (aggregation in Python):** fires only when the iterable
+  being summed or counted comes from a database query — a direct
+  `frappe.get_all` / `frappe.get_list` / `frappe.db.sql` call inside
+  `sum()` / `len()`, or a variable assigned from such a call earlier in
+  the same file. In-memory iterables (`self.get(...)`, `self.items`,
+  `doc.items`, a plain list, or a list built from `self.get(...)`) do
+  not fire. SQL-side aggregation (`select sum(...)`) is not flagged.
+  (Narrowed 2026-11-27: the old version flagged any `sum()` / `len()`
+  in a file that called `get_all` anywhere, e.g. sums over
+  `self.get("items")` in ERPNext `sales_order.py`.)
 - **FR-010 (f-string in `_()`):** also flags a named `{placeholder}`
   inside `_()` — correct form is `{0}` + `.format()`. The rule's
   `example_bad` uses that named-placeholder form.
