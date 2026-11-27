@@ -94,6 +94,68 @@ only, written in our own wording). Full list: [`docs/RULES.md`](RULES.md).
   not trigger Pages builds). The 59 checks show there only after the
   next Pages build, triggered by a real file-change push.
 
+### Added after v0.1.0 — 15 important second-pass rules from the official frappe/skills review (2026-11-27)
+
+The second-pass candidates #17–#34 from the same review were worked
+through one by one. 15 were implemented (FR-060 to FR-076, skipping
+FR-068, FR-073 and FR-077 — see `docs/RULES.md` for the skipped ones
+and why), taking the tool from 59 to 74 checks. Only the rule ideas
+were taken, in our own wording — that repo has no licence file.
+
+- **FR-060 (blocker):** untyped or container-typed whitelisted
+  parameter passed to an ORM query (`get_all` / `get_list` /
+  `get_value` / `exists` / `count` / `delete`); `get_query` is not a
+  sink and does not fire.
+- **FR-061 (major):** whitelisted write method declared
+  `methods=["GET"]`.
+- **FR-062 (blocker):** whitelisted parameter named `ignore_*`
+  reaching the ORM, or `**kwargs` forwarded to the ORM.
+- **FR-063 (major):** check-then-insert race (`exists()` followed by
+  an insert of the same doctype); only the nearest guarding exists
+  check fires, and seed/demo/test files are exempt.
+- **FR-064 (major):** `db_set(..., commit=True)` or
+  `auto_commit_on_many_writes`, exempt in patches.
+- **FR-065 (major):** TLS verification off (`verify=False` /
+  `CERT_NONE` / unverified context / `check_hostname=False`), exempt
+  in tests.
+- **FR-066 (major):** `hashlib.md5` / `sha1` for a password, token or
+  secret, or a secret compared with `==`; cache keys and checksums do
+  not fire.
+- **FR-067 (major):** token or secret generated with `random.*` /
+  `uuid.uuid1` / `time.time()`; a bare `import random` does not fire.
+- **FR-069 (major):** self-referential assignment in `validate` /
+  `before_save` / `before_validate` / `on_change` (value compounds on
+  every save); FR-037 covers the `on_update` variant.
+- **FR-070 (major):** `except` block that only passes, continues or
+  logs around a write.
+- **FR-071 (major):** `permission_query_conditions` hook that can
+  return `""` / `None` or fall through (same fall-through analysis as
+  the corrected FR-040).
+- **FR-072 (major):** direct write to `docstatus` / `status` with
+  `set_value` / `db_set`.
+- **FR-074 (major):** mass assignment — `doc.update()` with request
+  data, or `get_doc(json.loads(...))`; a literal dict does not fire.
+- **FR-075 (major):** open redirect — `redirect_to` /
+  `flags.redirect` with a request value and no validation call in the
+  same function.
+- **FR-076 (major):** SSRF — `requests` / `urlopen` / `httpx` with a
+  request-controlled URL; a URL from `frappe.conf` does not fire.
+- Re-runs before pushing: the 6 FMC files are unchanged at 4 findings
+  (the known FR-023 cross-file delegates — FR-063 is exempt in the
+  seed file). ERPNext `sales_order.py` goes from 8 to 10 findings:
+  FR-072 fires twice, both true positives per the rule — a direct
+  `set_value("Opportunity", ..., "status", ...)` status sync in
+  `update_enquiry_status` (line 525) and `self.db_set("status",
+  "Cancelled")` in `on_cancel` (line 624). Both are deliberate core
+  patterns; the rule flags the mechanism (a direct status write
+  bypasses validate and the workflow), so they stay flagged. No new
+  rule false-positives on either file. Tests: 215 passed, 0 failed
+  (74 rules bad+good, 3 verdict, 138 regression, including 53 new
+  regression for FR-060 to FR-076).
+- **Live site note:** the live site still serves the v0.1.0 build
+  (Pages has not rebuilt since 0f17cf5). The 74 checks show there only
+  after the next Pages build, triggered by a real file-change push.
+
 ## What changed since the first build
 
 ### Fix round 1 — FR-023 and FR-032 narrowed (2026-11-27)

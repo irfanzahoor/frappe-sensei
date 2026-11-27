@@ -1,14 +1,14 @@
 # Frappe Sensei — Review Rules
 
-59 deterministic, statically checkable rules. The checker reads code only — it never runs it, and nothing is stored.
+74 deterministic, statically checkable rules. The checker reads code only — it never runs it, and nothing is stored.
 
-Source: `frappe_core_skills` v2.3.0 — [irfanzahoor/frappe_core_skills](https://github.com/irfanzahoor/frappe_core_skills) — for FR-001 to FR-035. FR-036 to FR-043 come from the Impertio-Studio/Frappe_Claude_Skill_Package review (61 skills, 2026-11-27); only the rule ideas were borrowed, in our own wording — their licence is inconsistent (README/package.json say MIT, LICENSE.md is LGPL v3), so no text was copied. FR-044 to FR-059 come from the official [frappe/skills](https://github.com/frappe/skills) review (12 skills, 2026-11-27); only the rule ideas were borrowed, in our own wording — that repo has no licence file, so no text was copied. FR-040 was corrected in the same round (see below): its source is now frappe/skills, not Impertio. The machine-readable form of these rules is `rules/rules.json`.
+Source: `frappe_core_skills` v2.3.0 — [irfanzahoor/frappe_core_skills](https://github.com/irfanzahoor/frappe_core_skills) — for FR-001 to FR-035. FR-036 to FR-043 come from the Impertio-Studio/Frappe_Claude_Skill_Package review (61 skills, 2026-11-27); only the rule ideas were borrowed, in our own wording — their licence is inconsistent (README/package.json say MIT, LICENSE.md is LGPL v3), so no text was copied. FR-044 to FR-059 come from the official [frappe/skills](https://github.com/frappe/skills) review (12 skills, 2026-11-27); only the rule ideas were borrowed, in our own wording — that repo has no licence file, so no text was copied. FR-040 was corrected in the same round (see below): its source is now frappe/skills, not Impertio. FR-060 to FR-076 come from the second pass over the same official frappe/skills review (candidates #17–#34, 2026-11-27); only the rule ideas were borrowed, in our own wording. The machine-readable form of these rules is `rules/rules.json`.
 
 Severity follows `agents/frappe-reviewer.md`: **blocker** = wrong placement, JS-only validation, missing permission check, SQL injection risk, `frappe.db.commit()` in a request; **major** = untranslated strings, `raise Exception`, N+1 query, `["*"]` fields, duplicate handlers; **minor** = style, missing `flt`/`cint`, field behaviour set in JS that belongs in the DocType.
 
-Totals: 59 rules — 16 blocker, 32 major, 11 minor. Categories: Placement 9, Framework APIs 22, Server vs Client 4, Security 15, Performance 9.
+Totals: 74 rules — 18 blocker, 45 major, 11 minor. Categories: Placement 9, Framework APIs 25, Server vs Client 4, Security 26, Performance 10.
 
-## All 59 rules
+## All 74 rules
 
 | ID | Severity | Category | Title | Source |
 |----|----------|----------|-------|--------|
@@ -71,6 +71,21 @@ Totals: 59 rules — 16 blocker, 32 major, 11 minor. Categories: Placement 9, Fr
 | FR-057 | major | placement | Database or site state read at module level in hooks.py | frappe/skills — skills/deep-app-audit/quality/A-customization/A24-hooks-py-is-static-data.md |
 | FR-058 | major | performance | Raw-SQL write without clearing the document cache | frappe/skills — skills/deep-app-audit/quality/B-correctness/B43-clear-the-document-cache-after-a-raw-write.md |
 | FR-059 | major | security | frappe.set_user() without restoration, or frappe.session.user assignment | frappe/skills — skills/deep-app-audit/security/D-auth-identity/D08-impersonation-set-user.md |
+| FR-060 | blocker | security | Untyped or container-typed whitelisted parameter passed to an ORM query | frappe/skills — skills/deep-app-audit/security/B-injection/B02-untyped-orm-parameters.md |
+| FR-061 | major | security | Whitelisted write method declared as GET | frappe/skills — skills/deep-app-audit/security/C-xss-client/C05-csrf.md |
+| FR-062 | blocker | security | Whitelisted parameter named ignore_* reaches the ORM, or **kwargs forwarded to the ORM | frappe/skills — skills/deep-app-audit/security/A-authorization/A03-client-settable-permission-bypass.md |
+| FR-063 | major | apis | Check-then-insert race: exists() followed by an insert of the same doctype | frappe/skills — skills/deep-app-audit/quality/B-correctness/B05-check-then-insert-is-a-race.md |
+| FR-064 | major | performance | db_set(..., commit=True) or frappe.db.auto_commit_on_many_writes | frappe/skills — skills/deep-app-audit/quality/B-correctness/B01-no-transaction-control-in-lifecycle.md |
+| FR-065 | major | security | TLS verification disabled (verify=False / CERT_NONE / unverified context) | frappe/skills — skills/deep-app-audit/security/F-ssrf-outbound/F01-ssrf.md |
+| FR-066 | major | security | Weak hash (md5 / sha1) used for a password, token or secret, or compared with == | frappe/skills — skills/deep-app-audit/security/G-crypto-secrets/G04-crypto-primitives.md |
+| FR-067 | major | security | Token or secret generated with random.* / uuid.uuid1 / time.time() | frappe/skills — skills/deep-app-audit/security/G-crypto-secrets/G03-weak-randomness.md |
+| FR-069 | major | apis | Self-referential assignment in validate / before_save (value compounds on every save) | frappe/skills — skills/deep-app-audit/quality/B-correctness/B09-computed-field-is-a-function-of-input.md |
+| FR-070 | major | apis | except block that only passes, continues or logs around a write | frappe/skills — skills/deep-app-audit/quality/B-correctness/B02-own-the-rollback-you-catch.md + B40-optional-step-must-not-fail-the-flow.md |
+| FR-071 | major | security | permission_query_conditions hook that can return "" / None (no restriction) | frappe/skills — skills/deep-app-audit/security/A-authorization/A06-permission-query-and-hooks.md |
+| FR-072 | major | security | Direct write to docstatus or status with set_value / db_set | frappe/skills — skills/deep-app-audit/security/H-business-logic/H02-workflow-docstatus-bypass.md |
+| FR-074 | major | security | Mass assignment: doc.update() with request data, or get_doc(json.loads(...)) | frappe/skills — skills/deep-app-audit/security/H-business-logic/H01-mass-assignment.md |
+| FR-075 | major | security | Open redirect: redirect_to / flags.redirect with a request value and no validation | frappe/skills — skills/deep-app-audit/security/F-ssrf-outbound/F03-open-redirect.md |
+| FR-076 | major | security | Server-side request forgery: requests / urlopen / httpx with a request-controlled URL | frappe/skills — skills/deep-app-audit/security/F-ssrf-outbound/F01-ssrf.md |
 
 ## Rule changes — FR-040 corrected + 16 new rules from the official frappe/skills review (2026-11-27)
 
@@ -96,6 +111,36 @@ The official [frappe/skills](https://github.com/frappe/skills) review (12 skills
 - **FR-059 (major):** `frappe.set_user(` without restoration in a `finally` block that calls `set_user(` again, or `frappe.session.user = ...` assignment.
 
 None of the 16 new rules fires on ERPNext `sales_order.py` (still 8 findings) or on the 6 FMC files (still 4 findings, the known FR-023 cross-file delegates) — both re-runs were done before pushing. Tests: 147 passed, 0 failed (59 rules bad+good, 3 verdict, 38 earlier regression, 47 new regression for FR-040 and FR-044–FR-059).
+
+## Rule changes — 15 important second-pass rules from the official frappe/skills review (2026-11-27)
+
+The second-pass candidates #17–#34 from the same review were worked through one by one, each proven against ERPNext `sales_order.py` and the 6 FMC files before pushing. 15 were implemented, FR-060 to FR-076, taking the tool from 59 to 74 checks. Only the rule ideas were taken; every title, description, example and fix is written in our own words, because the repo has no licence file. Three candidates were skipped — see "Skipped second-pass candidates" below.
+
+- **FR-060 (blocker):** an untyped parameter, or one annotated `dict`/`list` (including a union with `dict`/`list`), a string annotation, or a `dict`/`list` default, reaching an ORM sink (`get_all` / `get_list` / `get_value` / `exists` / `count` / `delete`) as a `filters=` value or a positional filter argument. A typed scalar parameter (`str`, `int`) coerced with `str()` / `int()` / `cint()` does not fire. `frappe.get_query` is NOT a sink — ERPNext core's `get_events` passes its `filters: str | dict` parameter straight into `get_query`, and that does not fire. A `filters=` built from `frappe.form_dict` / `json.loads` fires.
+- **FR-061 (major):** a whitelisted method declared `methods=["GET"]` (or `methods="GET"`) whose body writes. A GET-only method that only reads does not fire. Only the single-line decorator form is seen; a multi-line decorator with `methods=` on a later line does not fire.
+- **FR-062 (blocker):** a whitelisted parameter named `ignore_permissions` / `ignore_validate` / `ignore_mandatory` / `ignore_links` / `ignore_share` / `ignore_user_permissions` / `ignore_account_permission` used as an `ignore_*=` keyword value in an ORM call, or `**kwargs` forwarded into `get_doc` / `get_list` / `get_value` / `save` / `insert`. FR-025 covers only a literal `ignore_permissions=True`; this is the parameterised form. An `ignore_*` attribute (`self.ignore_linked_doctypes` in ERPNext `sales_order.py` `on_cancel`) is not a parameter and does not fire.
+- **FR-063 (major):** `frappe.db.exists("X", ...)` / `count("X", ...)` followed by an insert of doctype X in the same function — but only when the insert is guarded by that check: inside the `if not exists(...)` body, or after an `if exists(...): return / continue` early exit in the same block. When several exists checks for the same doctype precede the insert, only the nearest one (the actual guard) fires — the FMC seed file checks `exists("Batch")` once to skip work and again to guard the insert, and only the guarding check would fire. Catching `UniqueValidationError` around the insert exempts it. Demo / seed / test files are exempt — a seed script's check-then-insert is the idempotent-seed idiom, run once.
+- **FR-064 (major):** `.db_set(..., commit=True)` or any use of `frappe.db.auto_commit_on_many_writes`. Exempt in patch files.
+- **FR-065 (major):** `verify=False` / `CERT_NONE` / `ssl._create_unverified_context(` / `check_hostname=False`. String literals are stripped before checking, so a message mentioning `verify=False` does not fire. Test files are exempt.
+- **FR-066 (major):** `hashlib.md5(` / `sha1(` assigned to a variable named password / token / secret / signature / api key / auth / hash, or an md5/sha1 result compared with `==`, or `==` comparing two security-named variables. A variable named cache / etag / checksum (a cache key, not a secret) does not fire, and `password == ""` does not fire. `hmac.compare_digest` never fires.
+- **FR-067 (major):** a value named token / secret / password / invite / reset / otp / nonce / api key / session built from `random.*` / `uuid.uuid1()` / `time.time()`. A bare `import random` does not fire, and neither does `random` used for a non-security variable. Test files are exempt.
+- **FR-069 (major):** in a function named `validate` / `before_save` / `before_validate` / `on_change`, an assignment `<obj>.<field> = <expr>` where `<expr>` reads the same `<obj>.<field>`, or an augmented assignment (`+=`, `-=`, `*=`, `/=`) on a document field. `self.flags.*` assignments are exempt. FR-037 covers the `on_update` variant; an assignment in `on_update` does not fire here.
+- **FR-070 (major):** an `except` block whose non-comment body is only `pass` / `continue` / `frappe.log_error(...)`, catching a `try` block that contains a write. An except that re-raises or rolls back does not fire, and neither does an except around a read-only try.
+- **FR-071 (major):** a `permission_query_conditions` hook in `hooks.py` with a `return ""` / `return ''` / `return None` / bare `return`, or one that falls through to the end of the function. Same fall-through analysis as the corrected FR-040 (now a shared helper — the refactor also fixed a latent FR-040 false positive: an `if`/`else` chain ending in `else`, where every branch returns, was not recognised as returning). FR-040 does not check this hook.
+- **FR-072 (major):** `frappe.db.set_value(<doctype>, <name>, "docstatus"/"status", ...)` or `.set_value("docstatus"/"status", ...)` or `.db_set("docstatus"/"status", ...)` with a literal field name. A dict field argument (`set_value(..., {"status": ...})`) does not fire.
+- **FR-074 (major):** `.update(frappe.form_dict...)` / `.update(json.loads(...))` / `frappe.get_doc(json.loads(...))`, or `.update(<param>)` where `<param>` is a parameter of a whitelisted function. `.update()` with a literal dict does not fire — ERPNext `sales_order.py` lines 813 and 895 use literal dicts and do not fire.
+- **FR-075 (major):** `frappe.local.flags.redirect = ...` / `redirect_to(...)` where the target is a request value (`frappe.form_dict`, `frappe.local.request`, a parameter named next / return_to / continue / callback / redirect_to, or a variable assigned from request data) and the function contains no `startswith(` / `urlparse(` / `is_safe` validation call. Python only.
+- **FR-076 (major):** `requests.get/post/...` / `urllib.request.urlopen` / `httpx.get/post` / `frappe.make_get_request` / `make_post_request` / `make_request` whose URL argument is directly `frappe.form_dict` / `frappe.local.request`, a variable assigned from one, or (in a whitelisted function) one of its parameters. A URL from `frappe.conf` or a settings value does not fire.
+
+Re-runs before pushing: the 6 FMC files are unchanged at 4 findings (the known FR-023 cross-file delegates — FR-063 is exempt in the seed file). ERPNext `sales_order.py` goes from 8 to 10 findings: FR-072 fires twice, both true positives per the rule — a direct `set_value("Opportunity", ..., "status", ...)` status sync in `update_enquiry_status` (line 525) and `self.db_set("status", "Cancelled")` in `on_cancel` (line 624). Both are deliberate core patterns; the rule flags the mechanism (a direct status write bypasses validate and the workflow), so they stay flagged. No new rule false-positives on either file. Tests: 215 passed, 0 failed (74 rules bad+good, 3 verdict, 138 regression, including 53 new regression for FR-060 to FR-076).
+
+## Skipped second-pass candidates
+
+Three of the second-pass candidates #17–#34 were NOT implemented, because no sound, low-noise static check exists for them. The IDs that would have been theirs (FR-068, FR-073, FR-077) are left unused — never reused — so the implemented IDs stay in candidate order.
+
+- **#25 — `frappe.db.set_value` on a child-table doctype (would be FR-068):** skipped. A static check cannot tell a child-table doctype from a parent doctype without the DocType JSON, and ERPNext core itself writes bookkeeping fields directly to child rows (`sales_order.py` line 566: `frappe.db.set_value("Quotation Item", quotation_item, "ordered_qty", ...)`; line 932: `frappe.db.set_value("Sales Order Item", sales_order_item, "produced_qty", ...)`). The source rule (B27) itself allows direct writes of hidden bookkeeping fields the parent does not recompute — so a name-based check would flag accepted core practice. Revisit when the checker can read a DocType JSON (Phase 2).
+- **#30 — `@frappe.whitelist()` with no `methods=[...]`, or a whitelisted parameter with no type hint (would be FR-073):** skipped. The review itself says this would fire on nearly all existing Frappe code including ERPNext core. No narrow, low-noise form exists — most whitelisted write methods have no `methods=` restriction, and that is normal Frappe code. The genuinely dangerous forms are already covered: FR-061 (a write behind a declared GET) and FR-060 (an untyped parameter reaching an ORM query).
+- **#34 — Custom Field fieldname with no app-specific prefix (would be FR-077):** skipped. The check needs to know the app's chosen prefix, and the app's own convention is not always its folder name: FMC uses `fm_` (`fm_yield_*`, `fm_supplier_lot_no`), not `food_manufacturing_`, so an app-name-prefix check would false-positive on the user's own app. No reliable way to learn an app's chosen prefix statically. Revisit when the checker can read the app's existing fixtures and infer the prefix from them.
 
 ## Rule changes — 8 new rules from the Impertio review (2026-11-27)
 
@@ -174,7 +219,7 @@ reveals the markdown report at any time.
 
 ## Out of scope for Phase 1
 
-These were read in the v2.3.0 skills but are **not** in these 59 rules, because they are not deterministic static code checks:
+These were read in the v2.3.0 skills but are **not** in these 74 rules, because they are not deterministic static code checks:
 
 - **frappe-studio / frappe-flow / frappe-insights** — all five new v2.3.0 skills were fetched and read. Studio, Flow and Insights are config and product guidance (export to git, one agent one job, never share salary data on a public dashboard), not code patterns the checker can flag. No rule was invented from them.
 - **frappe-data** — backup-before-delete, preview-before-import and test-on-staging are process rules, not code patterns. Its one code rule (never raw SQL deletes / writes) is already covered by FR-022.
@@ -187,6 +232,6 @@ These were read in the v2.3.0 skills but are **not** in these 59 rules, because 
 
 1. Edit `rules/rules.json` only — it is the single source of truth. Never edit this table by hand; regenerate it from `rules.json`.
 2. Every rule needs a `source` file in `frappe_core_skills` (skill file, reference, agent or command) and a `pattern` concrete enough to implement in JavaScript (regex, AST node, or file-structure check).
-3. Keep the ID sequence FR-001 to FR-059 in order: category first, then severity (blocker, major, minor). New rules go at the end with the next free ID; never reuse or renumber an old ID.
+3. Keep the ID sequence FR-001 to FR-076 in order: category first, then severity (blocker, major, minor). New rules go at the end with the next free ID; never reuse or renumber an old ID. Skipped IDs stay unused (FR-068, FR-073 and FR-077 were skipped second-pass candidates — see "Skipped second-pass candidates" above).
 4. Keep severity aligned with `agents/frappe-reviewer.md`. Do not upgrade a minor to a blocker to make a report look stronger.
 5. Validate before pushing: `python3 -m json.tool rules/rules.json` must pass, the count must be exactly the number in this file's table, and every rule must have all 11 fields (`id`, `category`, `severity`, `title`, `description`, `pattern`, `example_bad`, `example_good`, `fix`, `source`, `versions`).

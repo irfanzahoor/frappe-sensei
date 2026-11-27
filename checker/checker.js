@@ -72,6 +72,21 @@ export const RULES = [
   { id: 'FR-057', severity: 'major', category: 'placement', title: 'Database or site state read at module level in hooks.py', fix: 'Keep hooks.py to static data only. Move per-site conditions into the handler body, or into a before_enable hook.' },
   { id: 'FR-058', severity: 'major', category: 'performance', title: 'Raw-SQL write without clearing the document cache', fix: 'Call frappe.clear_document_cache(doctype, name) — or frappe.clear_cache(doctype=...) — in the same function after a raw SQL write.' },
   { id: 'FR-059', severity: 'major', category: 'security', title: 'frappe.set_user() without restoration, or frappe.session.user assignment', fix: 'Restore the original user in a finally block after every set_user, or use frappe.only_for / a permission check instead of switching users.' },
+  { id: 'FR-060', severity: 'blocker', category: 'security', title: 'Untyped or container-typed whitelisted parameter passed to an ORM query', fix: 'Type every whitelisted parameter (str, int, list[str]) and validate it before the query; accept only scalar values for filter keys, and build filters from a fixed allowlist of fields.' },
+  { id: 'FR-061', severity: 'major', category: 'security', title: 'Whitelisted write method declared as GET', fix: 'Declare write methods with methods=["POST"] (or no GET restriction); never put a write behind a GET endpoint.' },
+  { id: 'FR-062', severity: 'blocker', category: 'security', title: 'Whitelisted parameter named ignore_* reaches the ORM, or **kwargs forwarded to the ORM', fix: 'Never accept ignore_* as a request parameter; decide server-side, from the user\'s roles, whether a permission check is skipped, and pass a literal False otherwise.' },
+  { id: 'FR-063', severity: 'major', category: 'apis', title: 'Check-then-insert race: exists() followed by an insert of the same doctype', fix: 'Insert first and catch frappe.UniqueValidationError, or put a unique index on the field and let the database enforce it; never trust a separate exists() check.' },
+  { id: 'FR-064', severity: 'major', category: 'performance', title: 'db_set(..., commit=True) or frappe.db.auto_commit_on_many_writes', fix: 'Drop commit=True and let the request commit once at the end; if a value must be visible to another request immediately, do the work in a background job instead.' },
+  { id: 'FR-065', severity: 'major', category: 'security', title: 'TLS verification disabled (verify=False / CERT_NONE / unverified context)', fix: 'Leave TLS verification on; if a local or self-signed certificate is needed, pass its CA bundle to verify= instead of turning verification off.' },
+  { id: 'FR-066', severity: 'major', category: 'security', title: 'Weak hash (md5 / sha1) used for a password, token or secret, or compared with ==', fix: 'Hash passwords with frappe.utils.password or passlib, sign tokens with hmac.new(..., hashlib.sha256), and compare secrets only with hmac.compare_digest. Keep md5/sha1 only for cache keys and checksums.' },
+  { id: 'FR-067', severity: 'major', category: 'security', title: 'Token or secret generated with random.* / uuid.uuid1 / time.time()', fix: 'Generate tokens with secrets.token_hex / secrets.token_urlsafe, or frappe.generate_hash(); use uuid.uuid4 for random ids.' },
+  { id: 'FR-069', severity: 'major', category: 'apis', title: 'Self-referential assignment in validate / before_save (value compounds on every save)', fix: 'Compute the field from its inputs (row.base_qty, the rate, the document) instead of from its own current value; if a running total is needed, reset it to 0 first and sum the rows.' },
+  { id: 'FR-070', severity: 'major', category: 'apis', title: 'except block that only passes, continues or logs around a write', fix: 'Re-raise after logging, or roll back and return an explicit error to the caller; never swallow a failed write.' },
+  { id: 'FR-071', severity: 'major', category: 'security', title: 'permission_query_conditions hook that can return "" / None (no restriction)', fix: 'Return a real condition for every user, including the administrator ("1=1" when unrestricted); never return an empty string or fall off the end of the hook.' },
+  { id: 'FR-072', severity: 'major', category: 'security', title: 'Direct write to docstatus or status with set_value / db_set', fix: 'Change status through the document\'s own method (doc.submit(), doc.cancel(), or the DocType\'s status method) so validate and the workflow run; use set_value only for plain data fields.' },
+  { id: 'FR-074', severity: 'major', category: 'security', title: 'Mass assignment: doc.update() with request data, or get_doc(json.loads(...))', fix: 'Copy only the fields the endpoint allows into a new dict (an explicit allowlist), validate each one, then update the document with that dict.' },
+  { id: 'FR-075', severity: 'major', category: 'security', title: 'Open redirect: redirect_to / flags.redirect with a request value and no validation', fix: 'Allow only relative paths or URLs on a fixed allowlist of hosts; validate with urlparse and reject anything that does not start with / or the app\'s own domain.' },
+  { id: 'FR-076', severity: 'major', category: 'security', title: 'Server-side request forgery: requests / urlopen / httpx with a request-controlled URL', fix: 'Build the URL server-side from a fixed allowlist of hosts or from frappe.conf; never let a request parameter choose the host or scheme.' },
 ];
 
 const OTHER_APP_RE = /(^|\/)apps\/(frappe|erpnext|hrms|crm|helpdesk)\//;
@@ -228,6 +243,134 @@ function enclosingJsHandler(lines, idx) {
 // A def inside `class X(Document):` has isDocumentClass true when the
 // class bases mention Document. Header lines of a multi-line def are
 // collected so params are parsed correctly and are not in the body.
+
+// Escape a string for use inside a RegExp.
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Parse a def header (which may span lines) into its parameters:
+// [{ name, annotation, default, rest (*args), kwargs (**kwargs) }].
+// parsePyFunctions only keeps parameter names; the second-pass rules
+// (FR-060, FR-062, FR-074) need the annotations too.
+function paramInfo(lines, fnLine) {
+  let text = lines[fnLine] || '';
+  let depth = (text.match(/\(/g) || []).length - (text.match(/\)/g) || []).length;
+  let k = fnLine;
+  while (depth > 0 && k + 1 < lines.length && k - fnLine < 10) {
+    k++;
+    text += '\n' + lines[k];
+    depth += (lines[k].match(/\(/g) || []).length - (lines[k].match(/\)/g) || []).length;
+  }
+  const inner = text.slice(text.indexOf('(') + 1, text.lastIndexOf(')'));
+  const parts = [];
+  let d = 0, cur = '', inStr = null;
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (inStr) {
+      cur += ch;
+      if (ch === inStr && inner[i - 1] !== '\\') inStr = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { inStr = ch; cur += ch; continue; }
+    if (ch === '(' || ch === '[' || ch === '{') d++;
+    if (ch === ')' || ch === ']' || ch === '}') d--;
+    if (ch === ',' && d === 0) { parts.push(cur); cur = ''; } else cur += ch;
+  }
+  if (cur.trim()) parts.push(cur);
+  return parts.map((p) => {
+    let s = p.trim();
+    let rest = false, kw = false;
+    if (s.startsWith('**')) { kw = true; s = s.slice(2).trim(); }
+    else if (s.startsWith('*')) { rest = true; s = s.slice(1).trim(); }
+    // Split the default on the first top-level '='.
+    let deflt = '';
+    let dd = 0, eq = -1;
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (ch === '(' || ch === '[' || ch === '{') dd++;
+      if (ch === ')' || ch === ']' || ch === '}') dd--;
+      if (ch === '=' && dd === 0 && s[i + 1] !== '=') { eq = i; break; }
+    }
+    if (eq !== -1) { deflt = s.slice(eq + 1).trim(); s = s.slice(0, eq).trim(); }
+    let name = s, annotation = '';
+    const colon = s.indexOf(':');
+    if (colon !== -1) { name = s.slice(0, colon).trim(); annotation = s.slice(colon + 1).trim(); }
+    return { name, annotation, default: deflt, rest, kwargs: kw };
+  }).filter((p) => p.name && p.name !== 'self' && p.name !== 'cls');
+}
+
+// Can a caller pass a dict/list through this parameter? True when the
+// parameter has no annotation, a dict/list annotation (including a
+// union with dict/list), a string annotation, or a dict/list default.
+// With `from __future__ import annotations` every annotation is a
+// string at runtime, so nothing can be trusted to be a scalar.
+function isContainerCapable(p, futureAnnotations) {
+  if (!p.annotation) return true;
+  const a = p.annotation.trim();
+  if (/^['"]/.test(a)) return true;
+  if (futureAnnotations) return true;
+  if (/\b(dict|list)\b/i.test(a)) return true;
+  if (p.default && /^\s*(\{|\[)/.test(p.default)) return true;
+  return false;
+}
+
+// Variables assigned from request data inside a function body: a bare
+// name assigned from frappe.form_dict / frappe.local.request /
+// json.loads(...). The redirect (FR-075) and SSRF (FR-076) checks
+// treat such a variable as request-controlled.
+function taintedRequestVars(bodyLines) {
+  const tainted = new Set();
+  for (const b of bodyLines) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/.exec(b.text);
+    if (m && /frappe\.(?:local\.)?(?:form_dict|request)\b|json\.loads\s*\(/.test(m[2])) tainted.add(m[1]);
+  }
+  return tainted;
+}
+
+// Does a permission hook function end with a return on every path?
+// Used by FR-040 (has_permission) and FR-071
+// (permission_query_conditions). "Ends" means the last top-level
+// statement of the body: a return nested inside an if does not end
+// the function — the code after the if still runs. An if/else chain
+// where every branch ends in a return is safe (no fall-through path).
+function hookEndsWithReturn(bodyLines) {
+  const body = bodyLines.filter((b) => b.text.trim() !== '' && !isCommentPy(b.text));
+  if (!body.length) return false;
+  const bodyIndent = indentOf(body[0].text);
+  const top = body.filter((b) => indentOf(b.text) === bodyIndent);
+  const lastTop = top[top.length - 1];
+  if (/^\s*return\b/.test(lastTop.text)) return true;
+  if (/^\s*(if|elif|else)\b/.test(lastTop.text)) {
+    // Last top-level statement is an if-chain: safe only if the chain
+    // has an else and every branch ends in a return. The chain may end
+    // in an else, so walk backwards from the last branch to the `if`
+    // that starts the chain, then check each branch's last statement.
+    let chainStart = body.indexOf(lastTop);
+    for (let j = chainStart - 1; j >= 0; j--) {
+      const lb = body[j];
+      if (indentOf(lb.text) === bodyIndent && /^\s*(if|elif|else)\b/.test(lb.text)) chainStart = j;
+      else if (indentOf(lb.text) > bodyIndent) continue; // branch body
+      else break;
+    }
+    const chain = [];
+    let cur = null;
+    const chainLines = body.slice(chainStart);
+    for (const b of chainLines) {
+      if (indentOf(b.text) === bodyIndent && /^\s*(if|elif|else)\b/.test(b.text)) {
+        cur = { kind: /^\s*else\b/.test(b.text) ? 'else' : 'if', last: null };
+        chain.push(cur);
+      } else if (cur && indentOf(b.text) > bodyIndent) {
+        cur.last = b;
+      }
+    }
+    const hasElse = chain.some((c) => c.kind === 'else');
+    const allReturn = chain.length > 0 && chain.every((c) => c.last && /^\s*return\b/.test(c.last.text));
+    if (hasElse && allReturn) return true;
+  }
+  return false;
+}
+
 function parsePyFunctions(lines) {
   const fns = [];
   let pendingDecorator = '';
@@ -587,6 +730,72 @@ export function checkFiles(files, rulesInput) {
         // string literals removed, so a message mentioning eval does not
         // flag; a real call still does.
         if (/\b(?:eval|exec)\s*\(/.test(stripStrings(line))) add('FR-042', path, i);
+      // FR-064 / FR-065 / FR-066 / FR-067 / FR-072 / FR-074 (request
+      // form) — per-line checks, second pass (2026-11-27).
+      {
+        const inTestFile = /(^|\/)(tests?)\//i.test(path) || /^test_/.test(base) || /_test\.py$/i.test(base);
+        const stripped = stripStrings(line);
+        const strippedAll = lines.map(stripStrings);
+        // FR-064: db_set(..., commit=True) or auto_commit_on_many_writes
+        // commits mid-request. Exempt in patch files, where a commit is
+        // the point of the migration.
+        if (!/\/patches\//.test(path)) {
+          if (/auto_commit_on_many_writes/.test(line)) add('FR-064', path, i);
+          const dbSet = /\.db_set\s*\(/.exec(stripped);
+          if (dbSet) {
+            const { text, endIndex } = joinCallText(strippedAll, i, dbSet.index);
+            if (/commit\s*=\s*True\b/.test(text)) add('FR-064', path, i);
+            i = endIndex;
+          }
+        }
+        // FR-065: TLS verification off. Test files are exempt.
+        if (!inTestFile && (/verify\s*=\s*False\b/.test(stripped) || /CERT_NONE\b/.test(stripped)
+          || /ssl\._create_unverified_context\s*\(/.test(stripped) || /check_hostname\s*=\s*False\b/.test(stripped))) {
+          add('FR-065', path, i);
+        }
+        // FR-066: md5/sha1 for a security-named value, or a secret
+        // compared with ==. A variable named cache / etag / checksum
+        // (a cache key or checksum, not a secret) does not fire.
+        {
+          const secVar = /(?:password|passwd|token|secret|signature|api[_-]?key|auth_token|_?hash)/i;
+          if (/\bhashlib\.(?:md5|sha1)\s*\(/.test(stripped)) {
+            const assign = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(stripped);
+            if (assign && secVar.test(assign[1])) add('FR-066', path, i);
+            else if (/==/.test(stripped)) add('FR-066', path, i);
+          } else if (/==/.test(stripped) && !/hmac\.compare_digest/.test(stripped) && !inTestFile) {
+            // Both sides must be security-named variables (a literal on
+            // either side, e.g. `password == ""`, is a check, not a
+            // secret comparison).
+            const leftVar = /([A-Za-z_][A-Za-z0-9_.]*)\s*$/.exec(stripped.split('==')[0]);
+            const rightVar = /^\s*([A-Za-z_][A-Za-z0-9_.]*)/.exec(stripped.split('==')[1] || '');
+            if (leftVar && rightVar && secVar.test(leftVar[1]) && secVar.test(rightVar[1])) add('FR-066', path, i);
+          }
+        }
+        // FR-067: a token/secret built from random.* / uuid.uuid1 /
+        // time.time(). A bare `import random` does not fire; test files
+        // are exempt.
+        if (!inTestFile) {
+          const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/.exec(stripped);
+          if (m && /(?:token|secret|password|invite|reset|otp|nonce|api[_-]?key|session)/i.test(m[1])
+            && /\brandom\.(?:random|randint|choice|randrange|uniform|sample)\s*\(|uuid\.uuid1\s*\(|time\.time\s*\(/.test(m[2])) {
+            add('FR-067', path, i);
+          }
+        }
+        // FR-072: direct write to docstatus / status with set_value /
+        // db_set. A dict field argument (set_value(..., {"status": ...}))
+        // is not a literal field name and does not fire.
+        if (/frappe\.db\.set_value\s*\(\s*['"][^'"]+['"]\s*,\s*[^,]+,\s*['"](?:docstatus|status)['"]/.test(line)
+          || /\.(?:set_value|db_set)\s*\(\s*['"](?:docstatus|status)['"]/.test(line)) {
+          add('FR-072', path, i);
+        }
+        // FR-074 (request form): doc.update(frappe.form_dict...) /
+        // .update(json.loads(...)) / frappe.get_doc(json.loads(...)).
+        // The bare-parameter form is in the whitelisted-function block.
+        if (/\.(?:update)\s*\(\s*(?:frappe\.(?:local\.)?form_dict\b|json\.loads\s*\()/.test(stripped)
+          || /frappe\.get_doc\s*\(\s*json\.loads\s*\(/.test(stripped)) {
+          add('FR-074', path, i);
+        }
+      }
       }
       // Loop-aware Python checks (FR-030, FR-031) — indentation tracking.
       // Demo / seed / test files insert demo data in loops by design, so
@@ -802,10 +1011,13 @@ export function checkFiles(files, rulesInput) {
           i = endIndex;
         }
       }
-      // FR-023 / FR-024 / FR-033 — per whitelisted function.
+      // FR-023 / FR-024 / FR-033 / FR-060 / FR-061 / FR-062 / FR-074
+      // (param form) — per whitelisted function.
       {
         const fns = parsePyFunctions(lines);
         const hasEnqueue = /frappe\.enqueue\s*\(/.test(content);
+        const strippedAll = lines.map(stripStrings);
+        const futureAnnotations = /from\s+__future__\s+import\s+annotations/.test(content);
         for (const fn of fns) {
           const isWhitelisted = /frappe\.whitelist/.test(fn.decorator);
           const isGuest = /allow_guest\s*=\s*True/.test(fn.decorator);
@@ -856,6 +1068,77 @@ export function checkFiles(files, rulesInput) {
               if (/frappe\.sendmail|requests\.(get|post)/.test(bodyText)) add('FR-033', path, fn.line);
             }
           }
+          if (isWhitelisted) {
+            const infos = paramInfo(lines, fn.line);
+            // FR-060: an untyped or container-typed parameter reaching an
+            // ORM sink (get_all / get_list / get_value / exists / count /
+            // delete) as a filters= value or a positional filter
+            // argument. A typed scalar parameter (str, int, ...) that is
+            // coerced with str()/int()/cint() first does not fire.
+            // get_query is NOT a sink: it takes its own filters and
+            // applies its own permission handling.
+            {
+              const containerParams = infos
+                .filter((p) => !p.kwargs && !p.rest && isContainerCapable(p, futureAnnotations))
+                .map((p) => p.name);
+              const tainted = taintedRequestVars(fn.bodyLines);
+              const SINKS = /frappe\.(?:get_all|get_list)\s*\(|frappe\.db\.(?:get_value|exists|count|delete)\s*\(/;
+              for (const b of fn.bodyLines) {
+                if (isCommentPy(b.text)) continue;
+                const m = SINKS.exec(strippedAll[b.line]);
+                if (!m) continue;
+                const { text } = joinCallText(strippedAll, b.line, m.index);
+                let fire = false;
+                if (/filters\s*=\s*frappe\.(?:local\.)?form_dict\b/.test(text) || /filters\s*=\s*json\.loads\s*\(/.test(text)) fire = true;
+                const filtersArg = /filters\s*=\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(text);
+                if (!fire && filtersArg && (containerParams.includes(filtersArg[1]) || tainted.has(filtersArg[1]))) fire = true;
+                if (!fire) {
+                  for (const p of containerParams) {
+                    const coerced = new RegExp('\\b(?:str|cstr|int|cint|flt|float)\\s*\\(\\s*' + escapeRe(p) + '\\b').test(text);
+                    if (!coerced && new RegExp('\\b' + escapeRe(p) + '\\b').test(text)) { fire = true; break; }
+                  }
+                }
+                if (fire) add('FR-060', path, b.line);
+              }
+            }
+            // FR-061: a whitelisted method declared methods=["GET"] that
+            // writes. GET is not CSRF-protected. Only the single-line
+            // decorator form is seen here; a multi-line decorator with
+            // methods= on a later line does not fire.
+            if (/methods\s*=\s*\[?\s*["']GET["']/.test(fn.decorator)) {
+              if (WRITE_CALL_RE.test(bodyText) || /frappe\.db\.(?:set_value|delete|sql)\s*\(/.test(bodyText) || /\.db_set\s*\(/.test(bodyText)) add('FR-061', path, fn.line);
+            }
+            // FR-062: a whitelisted parameter named ignore_* reaching
+            // the ORM as an ignore_*= keyword, or **kwargs forwarded
+            // into get_doc / get_list / get_value / save / insert.
+            // FR-025 covers only a literal ignore_permissions=True;
+            // this is the parameterised form. An ignore_* attribute
+            // (self.ignore_linked_doctypes) is not a parameter and
+            // does not fire.
+            {
+              const ignoreParams = infos
+                .filter((p) => /^ignore_(?:permissions|validate|mandatory|links|share|user_permissions|account_permission)$/.test(p.name))
+                .map((p) => p.name);
+              let fired = false;
+              for (const p of ignoreParams) {
+                if (new RegExp('ignore_(?:permissions|validate|mandatory|links|share|user_permissions|account_permission)\\s*=\\s*' + escapeRe(p) + '\\b').test(bodyText)) { fired = true; break; }
+              }
+              const hasKwargs = infos.some((p) => p.kwargs);
+              if (!fired && hasKwargs && (/\bget_(?:doc|list|value)\s*\([^)]*\*\*kwargs/.test(bodyText) || /\.(?:save|insert)\s*\([^)]*\*\*kwargs/.test(bodyText))) fired = true;
+              if (fired) add('FR-062', path, fn.line);
+            }
+            // FR-074 (param form): .update(<param>) in a whitelisted
+            // function applies a request parameter to a document whole.
+            // The form_dict / json.loads form is in the per-line loop.
+            for (const b of fn.bodyLines) {
+              if (isCommentPy(b.text)) continue;
+              const m = /\.update\s*\(/.exec(strippedAll[b.line]);
+              if (!m) continue;
+              const { text } = joinCallText(strippedAll, b.line, m.index);
+              const arg = /\.update\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(text);
+              if (arg && infos.some((p) => p.name === arg[1])) add('FR-074', path, b.line);
+            }
+          }
         }
       }
       // FR-036 / FR-037 / FR-038 — controller lifecycle methods.
@@ -895,7 +1178,8 @@ export function checkFiles(files, rulesInput) {
           if (isWrongLifecycleName(fn.name)) add('FR-053', path, fn.line);
         }
       }
-      // FR-051 / FR-054 / FR-055 / FR-058 / FR-059 — per-function checks.
+      // FR-051 / FR-054 / FR-055 / FR-058 / FR-059 / FR-063 / FR-069 /
+      // FR-070 / FR-075 / FR-076 — per-function checks.
       {
         const fns = parsePyFunctions(lines);
         for (const fn of fns) {
@@ -973,9 +1257,177 @@ export function checkFiles(files, rulesInput) {
               }
             }
           }
+          // FR-063: check-then-insert race — exists()/count() for a
+          // doctype followed by an insert of the same doctype in the
+          // same function. The insert must be guarded by that exists
+          // check: either inside the `if not exists(...)` body, or
+          // after an `if exists(...): return / continue` early exit in
+          // the same block. When several exists checks for the same
+          // doctype precede the insert, only the nearest one (the
+          // actual guard) fires — a seed file that checks exists()
+          // once to skip work and again to guard the insert reports
+          // only the guarding check. Catching UniqueValidationError
+          // around the insert is the fix. Demo / seed / test files are
+          // exempt — a seed script's check-then-insert is the
+          // idempotent-seed idiom, run once, not a concurrent request.
+          if (!isDemoSeedTest) {
+            const varDoctype = new Map(); // var -> doctype
+            const existsChecks = []; // { doctype, line, idx, indent, isNot, hasEarlyExit, bodyEndIdx }
+            const inserts = []; // { doctype, line, idx, indent }
+            for (let bi = 0; bi < fn.bodyLines.length; bi++) {
+              const b = fn.bodyLines[bi];
+              if (isCommentPy(b.text)) continue;
+              const ex = /frappe\.db\.(?:exists|count)\s*\(\s*['"]([^'"]+)['"]/.exec(b.text);
+              if (ex) {
+                const isNot = /^\s*if\s+not\b/.test(b.text);
+                const ind = indentOf(b.text);
+                // Body of the if: deeper-indented lines until dedent.
+                let hasEarlyExit = false;
+                let bodyEndIdx = fn.bodyLines.length;
+                for (let j = bi + 1; j < fn.bodyLines.length; j++) {
+                  const lb = fn.bodyLines[j];
+                  if (lb.text.trim() && indentOf(lb.text) <= ind) { bodyEndIdx = j; break; }
+                  if (/^\s*(return|continue|raise)\b|frappe\.throw\s*\(/.test(lb.text)) hasEarlyExit = true;
+                }
+                existsChecks.push({ doctype: ex[1], line: b.line, idx: bi, indent: ind, isNot, hasEarlyExit, bodyEndIdx });
+              }
+              const nd = /([A-Za-z_][A-Za-z0-9_]*)\s*=\s*frappe\.new_doc\s*\(\s*['"]([^'"]+)['"]/.exec(b.text);
+              if (nd) varDoctype.set(nd[1], nd[2]);
+              const gd = /([A-Za-z_][A-Za-z0-9_]*)\s*=\s*frappe\.get_doc\s*\(\s*\{\s*['"]doctype['"]\s*:\s*['"]([^'"]+)['"]/.exec(b.text);
+              if (gd) varDoctype.set(gd[1], gd[2]);
+              const direct = /frappe\.get_doc\s*\(\s*\{\s*['"]doctype['"]\s*:\s*['"]([^'"]+)['"][^}]*\}\s*\)\s*\.insert\s*\(/.exec(b.text);
+              if (direct) inserts.push({ doctype: direct[1], line: b.line, idx: bi, indent: indentOf(b.text) });
+              const vi = /([A-Za-z_][A-Za-z0-9_]*)\.insert\s*\(/.exec(b.text);
+              if (vi && varDoctype.has(vi[1])) inserts.push({ doctype: varDoctype.get(vi[1]), line: b.line, idx: bi, indent: indentOf(b.text) });
+            }
+            if (existsChecks.length && inserts.length && !/UniqueValidationError/.test(bodyText)) {
+              for (const ins of inserts) {
+                // Nearest preceding exists for the same doctype.
+                let guard = null;
+                for (const ec of existsChecks) {
+                  if (ec.doctype === ins.doctype && ec.line < ins.line) guard = ec;
+                }
+                if (!guard) continue;
+                // (a) insert inside the `if not exists(...)` body.
+                const inIfBody = guard.isNot && ins.idx > guard.idx && ins.idx < guard.bodyEndIdx;
+                // (b) insert after an early-exit `if exists(...)` in
+                // the same block: after the if body, before any dedent
+                // below the if's indent.
+                let afterEarlyExit = false;
+                if (!guard.isNot && guard.hasEarlyExit && ins.idx >= guard.bodyEndIdx && ins.indent >= guard.indent) {
+                  afterEarlyExit = true;
+                  for (let j = guard.bodyEndIdx; j < ins.idx; j++) {
+                    const lb = fn.bodyLines[j];
+                    if (lb.text.trim() && indentOf(lb.text) < guard.indent) { afterEarlyExit = false; break; }
+                  }
+                }
+                if (inIfBody || afterEarlyExit) add('FR-063', path, guard.line);
+              }
+            }
+          }
+          // FR-069: self-referential assignment in validate /
+          // before_save / before_validate / on_change — the value
+          // compounds on every save. FR-037 covers the on_update
+          // variant. self.flags.* assignments are exempt.
+          if (['validate', 'before_save', 'before_validate', 'on_change'].includes(fn.name)) {
+            for (const b of fn.bodyLines) {
+              if (isCommentPy(b.text)) continue;
+              const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*(?:\+=|-=|\*=|\/=|=(?!=))/.exec(b.text);
+              if (!m || m[2] === 'flags') continue;
+              const target = m[1] + '.' + m[2];
+              const rhs = b.text.slice(b.text.indexOf('=') + 1);
+              const isAugmented = /\+=|-=|\*=|\/=/.test(b.text.slice(0, b.text.indexOf('=') + 1));
+              if (isAugmented || new RegExp('\\b' + escapeRe(target) + '\\b').test(rhs)) add('FR-069', path, b.line);
+            }
+          }
+          // FR-070: except block that only passes / continues / logs
+          // around a write — the failure is swallowed. An except that
+          // re-raises or rolls back does not fire.
+          {
+            const WRITE_RE = /\.(insert|save|submit|delete|set_value|db_set)\s*\(|frappe\.db\.(?:set_value|delete|sql|commit)\s*\(/;
+            const bodyLines = fn.bodyLines;
+            for (let k = 0; k < bodyLines.length; k++) {
+              if (!/^\s*except\b/.test(bodyLines[k].text)) continue;
+              const exIndent = indentOf(bodyLines[k].text);
+              const exBody = [];
+              for (let j = k + 1; j < bodyLines.length; j++) {
+                const lb = bodyLines[j];
+                if (lb.text.trim() && indentOf(lb.text) <= exIndent) break;
+                exBody.push(lb);
+              }
+              const meaningful = exBody.filter((lb) => lb.text.trim() !== '' && !isCommentPy(lb.text));
+              if (!meaningful.length) continue;
+              const silent = meaningful.every((lb) => /^\s*(pass|continue)\s*(#.*)?$/.test(lb.text) || /frappe\.log_error\s*\(/.test(lb.text));
+              if (!silent) continue;
+              // Find the matching try: the nearest preceding `try:` at
+              // the same indent, and check its body for a write.
+              let tryIdx = -1;
+              for (let j = k - 1; j >= 0; j--) {
+                if (/^\s*try\s*:/.test(bodyLines[j].text) && indentOf(bodyLines[j].text) === exIndent) { tryIdx = j; break; }
+                if (bodyLines[j].text.trim() && indentOf(bodyLines[j].text) < exIndent) break;
+              }
+              if (tryIdx === -1) continue;
+              let hasWrite = false;
+              for (let j = tryIdx + 1; j < k; j++) {
+                if (WRITE_RE.test(bodyLines[j].text)) { hasWrite = true; break; }
+              }
+              if (hasWrite) add('FR-070', path, bodyLines[k].line);
+            }
+          }
+          // FR-075: open redirect — a redirect target taken from the
+          // request with no validation call in the same function. The
+          // target may be a request value directly, or a variable
+          // assigned from one.
+          {
+            const tainted = taintedRequestVars(fn.bodyLines);
+            const redirectParams = (fn.params || []).filter((p) => /^(?:next|return_to|continue|callback|redirect_to|redirect|url|target)$/i.test(p));
+            const validated = /startswith\s*\(|urlparse\s*\(|is_safe_url|allowed_host/i.test(bodyText);
+            if (!validated) {
+              const strippedAll = lines.map(stripStrings);
+              for (const b of fn.bodyLines) {
+                if (isCommentPy(b.text)) continue;
+                const s = strippedAll[b.line];
+                let target = null;
+                const flagAssign = /frappe\.local\.flags\.redirect\s*=\s*(.+)$/.exec(s);
+                if (flagAssign) target = flagAssign[1];
+                else {
+                  const call = /\bredirect_to\s*\(/.exec(s);
+                  if (call) {
+                    const { text } = joinCallText(strippedAll, b.line, call.index);
+                    target = text;
+                  }
+                }
+                if (!target) continue;
+                const isRequest = /frappe\.(?:local\.)?(?:form_dict|request)\b/.test(target)
+                  || redirectParams.some((p) => new RegExp('\\b' + escapeRe(p) + '\\b').test(target))
+                  || [...tainted].some((v) => new RegExp('\\b' + escapeRe(v) + '\\b').test(target));
+                if (isRequest) add('FR-075', path, b.line);
+              }
+            }
+          }
+          // FR-076: SSRF — an outbound request to a URL taken from the
+          // request or, in a whitelisted function, from one of its
+          // parameters. A URL from frappe.conf or a settings value does
+          // not fire.
+          {
+            const tainted = taintedRequestVars(fn.bodyLines);
+            const OUTBOUND_RE = /(?:requests\.(?:get|post|put|delete|head|patch)|urllib\.request\.urlopen|httpx\.(?:get|post)|frappe\.make_(?:get_|post_)?request)\s*\(/;
+            const strippedAll = lines.map(stripStrings);
+            for (const b of fn.bodyLines) {
+              if (isCommentPy(b.text)) continue;
+              const m = OUTBOUND_RE.exec(strippedAll[b.line]);
+              if (!m) continue;
+              const { text } = joinCallText(strippedAll, b.line, m.index);
+              if (/frappe\.conf\b|get_single_value\s*\(|get_cached_value\s*\(/.test(text)) continue;
+              const isRequest = /frappe\.(?:local\.)?(?:form_dict|request)\b/.test(text)
+                || [...tainted].some((v) => new RegExp('\\b' + escapeRe(v) + '\\b').test(text))
+                || (isWhitelisted && (fn.params || []).some((p) => new RegExp('\\b' + escapeRe(p) + '\\b').test(text)));
+              if (isRequest) add('FR-076', path, b.line);
+            }
+          }
         }
       }
-      // FR-039 / FR-040 — permission hooks in hooks.py only. A hook
+      // FR-039 / FR-040 / FR-071 — permission hooks in hooks.py only. A hook
       // function defined in a separate permissions module is not seen
       // here; only the defs in hooks.py itself are checked.
       if (isHooks) {
@@ -994,43 +1446,19 @@ export function checkFiles(files, rulesInput) {
           // silently locks out every other user. Flag the hook when it
           // has no `return True` at all, when it has a bare `return`,
           // or when a path can fall through to the end of the function.
-          // "Ends" means the last top-level statement of the body: a
-          // return nested inside an if does not end the function — the
-          // code after the if still runs. An if/else chain where every
-          // branch ends in a return is safe (no fall-through path).
           if (fn.name === 'has_permission') {
             const body = fn.bodyLines.filter((b) => b.text.trim() !== '' && !isCommentPy(b.text));
             const hasReturnTrue = body.some((b) => /^\s*return\s+True\b/.test(b.text));
             const hasBareReturn = body.some((b) => /^\s*return\s*(#.*)?$/.test(b.text));
-            let endsWithReturn = false;
-            if (body.length) {
-              const bodyIndent = indentOf(body[0].text);
-              const top = body.filter((b) => indentOf(b.text) === bodyIndent);
-              const lastTop = top[top.length - 1];
-              if (/^\s*return\b/.test(lastTop.text)) {
-                endsWithReturn = true;
-              } else if (/^\s*if\b/.test(lastTop.text)) {
-                // Last top-level statement is an if-chain: safe only if
-                // the chain has an else and every branch ends in a
-                // return. Walk the chain (if/elif/else at body indent)
-                // and check each branch's last statement.
-                const chain = [];
-                let cur = null;
-                const chainLines = body.slice(body.indexOf(lastTop));
-                for (const b of chainLines) {
-                  if (indentOf(b.text) === bodyIndent && /^\s*(if|elif|else)\b/.test(b.text)) {
-                    cur = { kind: /^\s*else\b/.test(b.text) ? 'else' : 'if', last: null };
-                    chain.push(cur);
-                  } else if (cur && indentOf(b.text) > bodyIndent) {
-                    cur.last = b;
-                  }
-                }
-                const hasElse = chain.some((c) => c.kind === 'else');
-                const allReturn = chain.length > 0 && chain.every((c) => c.last && /^\s*return\b/.test(c.last.text));
-                if (hasElse && allReturn) endsWithReturn = true;
-              }
-            }
-            if (!hasReturnTrue || hasBareReturn || !endsWithReturn) add('FR-040', path, fn.line);
+            if (!hasReturnTrue || hasBareReturn || !hookEndsWithReturn(fn.bodyLines)) add('FR-040', path, fn.line);
+          }
+          // FR-071: permission_query_conditions returning "" / None (no
+          // restriction) or falling through. Same fall-through analysis
+          // as FR-040; FR-040 does not check this hook.
+          if (fn.name === 'permission_query_conditions') {
+            const body = fn.bodyLines.filter((b) => b.text.trim() !== '' && !isCommentPy(b.text));
+            const hasEmptyReturn = body.some((b) => /^\s*return\s*(?:""|''|None\b)/.test(b.text) || /^\s*return\s*(#.*)?$/.test(b.text));
+            if (hasEmptyReturn || !hookEndsWithReturn(fn.bodyLines)) add('FR-071', path, fn.line);
           }
         }
         // FR-053 (b): bad doc_events keys in hooks.py — event names the

@@ -1,5 +1,5 @@
 {
-  "description": "59 deterministic, statically checkable rules for the live /frappe-review web tool (MVP Phase 1 + 8 rules from the Impertio-Studio/Frappe_Claude_Skill_Package review, 2026-11-27, + FR-040 corrected and 16 rules from the official frappe/skills review, 2026-11-27). No rule runs code.",
+  "description": "74 deterministic, statically checkable rules for the live /frappe-review web tool (MVP Phase 1 + 8 rules from the Impertio-Studio/Frappe_Claude_Skill_Package review, 2026-11-27, + FR-040 corrected and 16 rules from the official frappe/skills review, 2026-11-27, + 15 important second-pass rules from the official frappe/skills review, 2026-11-27). No rule runs code.",
   "name": "frappe-sensei",
   "rules": [
     {
@@ -999,6 +999,261 @@
       "severity": "major",
       "source": "frappe/skills \u2014 skills/deep-app-audit/security/D-auth-identity/D08-impersonation-set-user.md",
       "title": "frappe.set_user() without restoration, or frappe.session.user assignment",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "A whitelisted method takes a parameter with no type annotation, or a dict/list annotation, and passes it into get_all / get_list / get_value / exists / count / delete as a filter or a key. A caller can then pass a dict and inject ORM operators (for example {'>': '...'}) so the query returns or deletes rows it should not.",
+      "example_bad": "@frappe.whitelist()\ndef get_orders(filters):\n    return frappe.get_list(\"Sales Order\", filters=filters)",
+      "example_good": "@frappe.whitelist()\ndef get_orders(customer: str):\n    return frappe.get_list(\"Sales Order\", filters={\"customer\": customer})",
+      "fix": "Type every whitelisted parameter (str, int, list[str]) and validate it before the query; accept only scalar values for filter keys, and build filters from a fixed allowlist of fields.",
+      "id": "FR-060",
+      "pattern": "In a @frappe.whitelist() function, a parameter with no annotation, a dict/list annotation (including a union with dict/list), a string annotation, or a dict/list default reaches an ORM sink (get_all / get_list / get_value / exists / count / delete) as a filters= value or a positional filter argument; or filters= is built from frappe.form_dict / json.loads. A typed scalar parameter (str, int, float, bool) that is coerced with str() / int() / cint() does not fire.",
+      "severity": "blocker",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/B-injection/B02-untyped-orm-parameters.md",
+      "title": "Untyped or container-typed whitelisted parameter passed to an ORM query",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "A whitelisted method declared methods=[\"GET\"] performs a write (save, insert, delete, set_value, db_set, or a db.sql write). GET requests are not protected by the CSRF token, so a write behind a GET is reachable from a cross-site request.",
+      "example_bad": "@frappe.whitelist(methods=[\"GET\"])\ndef close_order(name):\n    doc = frappe.get_doc(\"Sales Order\", name)\n    doc.status = \"Closed\"\n    doc.save()",
+      "example_good": "@frappe.whitelist(methods=[\"POST\"])\ndef close_order(name):\n    doc = frappe.get_doc(\"Sales Order\", name)\n    doc.status = \"Closed\"\n    doc.save()",
+      "fix": "Declare write methods with methods=[\"POST\"] (or no GET restriction); never put a write behind a GET endpoint.",
+      "id": "FR-061",
+      "pattern": "A @frappe.whitelist(methods=[\"GET\"]) function body contains a write call (.insert / .save / .submit / .delete / .set_value / .db_set, or frappe.db.set_value / delete / sql write).",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/C-xss-client/C05-csrf.md",
+      "title": "Whitelisted write method declared as GET",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "A whitelisted function takes a parameter named ignore_permissions (or ignore_validate, ignore_mandatory, ignore_links, ignore_share, ignore_user_permissions, ignore_account_permission) and passes it into get_doc / save / set_value as an ignore_*= keyword, or forwards **kwargs into get_doc / get_list / save. A caller can then switch the permission check off from the request.",
+      "example_bad": "@frappe.whitelist()\ndef save_doc(name, ignore_permissions=False):\n    doc = frappe.get_doc(\"Sales Order\", name)\n    doc.save(ignore_permissions=ignore_permissions)\n    return doc.name",
+      "example_good": "@frappe.whitelist()\ndef save_doc(name):\n    doc = frappe.get_doc(\"Sales Order\", name)\n    doc.save()\n    return doc.name",
+      "fix": "Never accept ignore_* as a request parameter; decide server-side, from the user's roles, whether a permission check is skipped, and pass a literal False otherwise.",
+      "id": "FR-062",
+      "pattern": "In a @frappe.whitelist() function, a parameter whose name starts with ignore_ is used as an ignore_*= keyword value in an ORM call, or **kwargs is forwarded into get_doc / get_list / get_value / save / insert.",
+      "severity": "blocker",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/A-authorization/A03-client-settable-permission-bypass.md",
+      "title": "Whitelisted parameter named ignore_* reaches the ORM, or **kwargs forwarded to the ORM",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "A function checks frappe.db.exists (or count) for a doctype and then inserts a document of the same doctype when it does not exist. Two requests running at the same time both see \"not exists\" and both insert, creating duplicates or a UniqueValidationError.",
+      "example_bad": "@frappe.whitelist()\ndef register_device(serial_no, customer):\n    if not frappe.db.exists(\"Device\", {\"serial_no\": serial_no}):\n        frappe.get_doc({\"doctype\": \"Device\", \"serial_no\": serial_no, \"customer\": customer}).insert()",
+      "example_good": "@frappe.whitelist()\ndef register_device(serial_no, customer):\n    try:\n        frappe.get_doc({\"doctype\": \"Device\", \"serial_no\": serial_no, \"customer\": customer}).insert()\n    except frappe.UniqueValidationError:\n        return frappe.db.get_value(\"Device\", {\"serial_no\": serial_no}, \"name\")",
+      "fix": "Insert first and catch frappe.UniqueValidationError, or put a unique index on the field and let the database enforce it; never trust a separate exists() check.",
+      "id": "FR-063",
+      "pattern": "In one function, frappe.db.exists(\"X\", ...) or frappe.db.count(\"X\", ...) guards an insert of doctype X: either the insert sits inside the `if not exists(...)` body, or after an `if exists(...): return / continue` early exit in the same block. When several exists checks for the same doctype precede the insert, only the nearest one (the actual guard) fires. A function that catches UniqueValidationError around the insert does not fire. Demo / seed / test files are exempt.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/B-correctness/B05-check-then-insert-is-a-race.md",
+      "title": "Check-then-insert race: exists() followed by an insert of the same doctype",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "performance",
+      "description": "A db_set call with commit=True, or turning on auto_commit_on_many_writes, commits the transaction in the middle of a request. A later failure then leaves a half-applied change, and the framework can no longer roll the whole request back.",
+      "example_bad": "doc.db_set(\"counter\", 1, commit=True)",
+      "example_good": "doc.db_set(\"counter\", 1)",
+      "fix": "Drop commit=True and let the request commit once at the end; if a value must be visible to another request immediately, do the work in a background job instead.",
+      "id": "FR-064",
+      "pattern": "A .db_set(..., commit=True) call, or any use of frappe.db.auto_commit_on_many_writes, outside a patch file.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/B-correctness/B01-no-transaction-control-in-lifecycle.md",
+      "title": "db_set(..., commit=True) or frappe.db.auto_commit_on_many_writes",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "An outbound HTTP call is made with verify=False, ssl.CERT_NONE, ssl._create_unverified_context(), or check_hostname=False. The connection can be intercepted and the response faked, and a token or password sent over it can be stolen.",
+      "example_bad": "def fetch(url):\n    return requests.get(url, verify=False)",
+      "example_good": "def fetch(url):\n    return requests.get(url)",
+      "fix": "Leave TLS verification on; if a local or self-signed certificate is needed, pass its CA bundle to verify= instead of turning verification off.",
+      "id": "FR-065",
+      "pattern": "verify=False, CERT_NONE, ssl._create_unverified_context(, or check_hostname=False in a .py file. Test files are exempt.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/F-ssrf-outbound/F01-ssrf.md",
+      "title": "TLS verification disabled (verify=False / CERT_NONE / unverified context)",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "hashlib.md5 or hashlib.sha1 is used to hash a password, token, secret or signature, or a secret is compared with == instead of hmac.compare_digest. MD5 and SHA-1 are broken for security use: collisions are practical and a plain == comparison leaks the secret byte by byte through timing.",
+      "example_bad": "token = hashlib.md5(password.encode()).hexdigest()",
+      "example_good": "checksum = hashlib.md5(data).hexdigest()",
+      "fix": "Hash passwords with frappe.utils.password or passlib, sign tokens with hmac.new(..., hashlib.sha256), and compare secrets only with hmac.compare_digest. Keep md5/sha1 only for cache keys and checksums.",
+      "id": "FR-066",
+      "pattern": "hashlib.md5( / sha1( assigned to a variable named password / token / secret / signature / api key / auth / hash, or an md5/sha1 result compared with ==, or == comparing two security-named variables. Cache-key and checksum uses (a variable named cache / etag / checksum) do not fire; test files do not fire for the == form.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/G-crypto-secrets/G04-crypto-primitives.md",
+      "title": "Weak hash (md5 / sha1) used for a password, token or secret, or compared with ==",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "A value named token, secret, password, invite, reset, otp, nonce, api key or session is built from random.random / randint / choice, uuid.uuid1, or time.time(). Those are predictable: random is seeded from the clock, uuid1 embeds the MAC address and timestamp, and time.time() is guessable, so the token can be forged.",
+      "example_bad": "token = random.choice(string.ascii_letters)",
+      "example_good": "token = secrets.token_hex(16)",
+      "fix": "Generate tokens with secrets.token_hex / secrets.token_urlsafe, or frappe.generate_hash(); use uuid.uuid4 for random ids.",
+      "id": "FR-067",
+      "pattern": "An assignment to a variable named token / secret / password / invite / reset / otp / nonce / api key / session whose value calls random.* / uuid.uuid1() / time.time(). A bare import random does not fire; test files are exempt.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/G-crypto-secrets/G03-weak-randomness.md",
+      "title": "Token or secret generated with random.* / uuid.uuid1 / time.time()",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "Inside validate, before_save, before_validate or on_change, a field is assigned from itself (row.qty = row.qty * 1.1) or updated in place (self.total += row.amount). The method runs on every save, so the value compounds \u2014 the quantity grows by 10% on each save instead of being set once.",
+      "example_bad": "class SalesOrder(Document):\n    def validate(self):\n        for row in self.items:\n            row.qty = row.qty * 1.1",
+      "example_good": "class SalesOrder(Document):\n    def validate(self):\n        for row in self.items:\n            row.qty = flt(row.base_qty) * 1.1",
+      "fix": "Compute the field from its inputs (row.base_qty, the rate, the document) instead of from its own current value; if a running total is needed, reset it to 0 first and sum the rows.",
+      "id": "FR-069",
+      "pattern": "In a function named validate, before_save, before_validate or on_change, an assignment <obj>.<field> = <expr> where <expr> reads the same <obj>.<field>, or an augmented assignment (+=, -=, *=, /=) on a document field. self.flags.* assignments are exempt.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/B-correctness/B09-computed-field-is-a-function-of-input.md",
+      "title": "Self-referential assignment in validate / before_save (value compounds on every save)",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "A try block that writes (insert, save, submit, delete, set_value or a db.sql write) is caught by an except whose body is only pass, continue or frappe.log_error, with no re-raise and no rollback. The write fails silently: the user sees success, the data is missing, and nothing retries it.",
+      "example_bad": "def sync(doc):\n    try:\n        doc.insert()\n    except Exception:\n        pass",
+      "example_good": "def sync(doc):\n    try:\n        doc.insert()\n    except Exception:\n        frappe.log_error(\"sync failed\")\n        raise",
+      "fix": "Re-raise after logging, or roll back and return an explicit error to the caller; never swallow a failed write.",
+      "id": "FR-070",
+      "pattern": "In one function, an except block whose non-comment body is only pass / continue / frappe.log_error(...) catches a try block that contains a write call. An except that re-raises or rolls back does not fire.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/B-correctness/B02-own-the-rollback-you-catch.md + frappe/skills \u2014 skills/deep-app-audit/quality/B-correctness/B40-optional-step-must-not-fail-the-flow.md",
+      "title": "except block that only passes, continues or logs around a write",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "A permission_query_conditions hook in hooks.py returns an empty string or None, or falls through to the end of the function. An empty condition means \"no restriction\", so the query returns every document \u2014 the opposite of what a permission hook is for.",
+      "example_bad": "def permission_query_conditions(user):\n    if user == \"Administrator\":\n        return \"\"\n    return \"(`tabSales Order`.owner = '{0}')\".format(user)",
+      "example_good": "def permission_query_conditions(user):\n    if user == \"Administrator\":\n        return \"1=1\"\n    return \"(`tabSales Order`.owner = '{0}')\".format(user)",
+      "fix": "Return a real condition for every user, including the administrator (\"1=1\" when unrestricted); never return an empty string or fall off the end of the hook.",
+      "id": "FR-071",
+      "pattern": "In hooks.py, a def permission_query_conditions that has a return \"\" / return '' / return None / bare return, or whose last top-level statement is not a return (an if/else chain where every branch returns is safe).",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/A-authorization/A06-permission-query-and-hooks.md",
+      "title": "permission_query_conditions hook that can return \"\" / None (no restriction)",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "frappe.db.set_value, doc.set_value or doc.db_set writes the docstatus or status field directly. That bypasses validate, the workflow and the document's own status method, so the document ends up in a state the app's rules would never allow.",
+      "example_bad": "frappe.db.set_value(\"Sales Order\", name, \"docstatus\", 1)",
+      "example_good": "frappe.db.set_value(\"Sales Order\", name, \"delivery_status\", \"Delivered\")",
+      "fix": "Change status through the document's own method (doc.submit(), doc.cancel(), or the DocType's status method) so validate and the workflow run; use set_value only for plain data fields.",
+      "id": "FR-072",
+      "pattern": "frappe.db.set_value(<doctype>, <name>, \"docstatus\" / \"status\", ...) or .set_value(\"docstatus\" / \"status\", ...) or .db_set(\"docstatus\" / \"status\", ...) with a literal field name.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/H-business-logic/H02-workflow-docstatus-bypass.md",
+      "title": "Direct write to docstatus or status with set_value / db_set",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "A document is updated with frappe.form_dict, a json.loads() result, or a request parameter applied whole (doc.update(data)), or built from json.loads(). The caller can set any field \u2014 including docstatus, owner, or a protected field \u2014 because no field allowlist is applied.",
+      "example_bad": "@frappe.whitelist()\ndef update_doc(data):\n    doc = frappe.get_doc(\"Sales Order\", data[\"name\"])\n    doc.update(data)\n    doc.save()\n    return doc.name",
+      "example_good": "@frappe.whitelist()\ndef update_doc(name):\n    doc = frappe.get_doc(\"Sales Order\", name)\n    doc.update({\"status\": \"Closed\"})\n    doc.save()\n    return doc.name",
+      "fix": "Copy only the fields the endpoint allows into a new dict (an explicit allowlist), validate each one, then update the document with that dict.",
+      "id": "FR-074",
+      "pattern": "doc.update(frappe.form_dict...) / .update(json.loads(...)) / frappe.get_doc(json.loads(...)), or .update(<param>) where <param> is a parameter of a whitelisted function. .update() with a literal dict does not fire.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/H-business-logic/H01-mass-assignment.md",
+      "title": "Mass assignment: doc.update() with request data, or get_doc(json.loads(...))",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "A redirect target comes straight from the request (frappe.form_dict, frappe.local.request, or a parameter named next / return_to / continue / callback / redirect_to) with no validation call in the same function. An attacker can craft a link that sends the user to a lookalike login page after they sign in.",
+      "example_bad": "@frappe.whitelist()\ndef login_next():\n    frappe.local.flags.redirect = frappe.form_dict.get(\"next\")",
+      "example_good": "@frappe.whitelist()\ndef login_next():\n    frappe.local.flags.redirect = \"/desk\"",
+      "fix": "Allow only relative paths or URLs on a fixed allowlist of hosts; validate with urlparse and reject anything that does not start with / or the app's own domain.",
+      "id": "FR-075",
+      "pattern": "frappe.local.flags.redirect = ... / redirect_to(...) where the target is a request value or a variable assigned from one, and the function contains no startswith( / urlparse( / is_safe validation call. Python only.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/F-ssrf-outbound/F03-open-redirect.md",
+      "title": "Open redirect: redirect_to / flags.redirect with a request value and no validation",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "An outbound HTTP call (requests.get/post, urllib.request.urlopen, httpx, or frappe.make_get_request / make_post_request / make_request) is made to a URL taken straight from the request or from a whitelisted function's parameter. The server then fetches an internal address \u2014 metadata endpoints, localhost services \u2014 on the attacker's behalf.",
+      "example_bad": "@frappe.whitelist()\ndef fetch_url(url):\n    return requests.get(url)",
+      "example_good": "@frappe.whitelist()\ndef fetch_url():\n    api_url = frappe.conf.get(\"my_service_url\")\n    return requests.get(api_url)",
+      "fix": "Build the URL server-side from a fixed allowlist of hosts or from frappe.conf; never let a request parameter choose the host or scheme.",
+      "id": "FR-076",
+      "pattern": "An outbound-request call whose URL argument is directly frappe.form_dict / frappe.local.request, a variable assigned from one, or (in a whitelisted function) one of its parameters. A URL from frappe.conf or a settings value does not fire.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/F-ssrf-outbound/F01-ssrf.md",
+      "title": "Server-side request forgery: requests / urlopen / httpx with a request-controlled URL",
       "versions": [
         "v14",
         "v15",

@@ -40,7 +40,7 @@ function filesFor(id, kind) {
       return [{ path: 'my_app/hooks.py', content }];
     case 'FR-004': case 'FR-005': case 'FR-012': case 'FR-020': case 'FR-021': case 'FR-028': case 'FR-041':
       return [js];
-    case 'FR-039': case 'FR-040':
+    case 'FR-039': case 'FR-040': case 'FR-071':
       return [{ path: 'my_app/hooks.py', content }];
     case 'FR-048':
       return kind === 'bad'
@@ -625,6 +625,299 @@ for (const rule of rulesData.rules) {
       failures.push(`${t.name}: expected ${t.id} ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
       console.log(`FAIL ${t.name}: expected ${t.id} ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
     }
+  }
+}
+
+// Regression tests for the second-pass rules (FR-060 to FR-076,
+// 2026-11-27): the narrow forms and the exemptions the bad/good
+// examples do not cover.
+{
+  const regression5 = [
+    {
+      name: 'FR-040 (e) has_permission with an if/else chain where every branch returns does not fire',
+      files: [{ path: 'my_app/hooks.py', content: 'def has_permission(doc, ptype, user):\n    if doc.owner == user:\n        return True\n    else:\n        return False\n' }],
+      id: 'FR-040', shouldHave: false,
+    },
+    {
+      name: 'FR-060 (a) filters param reaching frappe.get_query does not fire (get_query is not a sink)',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef get_events(start, end, filters: str | dict = None):\n    return frappe.get_query("Event", filters=filters, ignore_permissions=False)\n' }],
+      id: 'FR-060', shouldHave: false,
+    },
+    {
+      name: 'FR-060 (b) dict-annotated param reaching get_all filters fires',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef get_items(filters: dict):\n    return frappe.get_all("Item", filters=filters)\n' }],
+      id: 'FR-060', shouldHave: true,
+    },
+    {
+      name: 'FR-060 (c) typed str param in a filters dict does not fire',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef get_items(customer: str):\n    return frappe.get_all("Item", filters={"customer": customer})\n' }],
+      id: 'FR-060', shouldHave: false,
+    },
+    {
+      name: 'FR-060 (d) str() coercion of an untyped param does not fire',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef get_item(name):\n    return frappe.db.get_value("Item", str(name), "price")\n' }],
+      id: 'FR-060', shouldHave: false,
+    },
+    {
+      name: 'FR-060 (e) filters built from form_dict fires',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef get_items():\n    return frappe.get_list("Item", filters=frappe.form_dict.get("filters"))\n' }],
+      id: 'FR-060', shouldHave: true,
+    },
+    {
+      name: 'FR-060 (f) untyped param reaching a sink in a non-whitelisted function does not fire',
+      files: [{ path: 'api.py', content: 'def get_items(filters):\n    return frappe.get_list("Item", filters=filters)\n' }],
+      id: 'FR-060', shouldHave: false,
+    },
+    {
+      name: 'FR-061 (a) GET method that only reads does not fire',
+      files: [{ path: 'api.py', content: '@frappe.whitelist(methods=["GET"])\ndef get_total(name):\n    return frappe.db.get_value("Sales Order", name, "grand_total")\n' }],
+      id: 'FR-061', shouldHave: false,
+    },
+    {
+      name: 'FR-061 (b) methods="GET" (string form) with a write fires',
+      files: [{ path: 'api.py', content: '@frappe.whitelist(methods="GET")\ndef close_order(name):\n    doc = frappe.get_doc("Sales Order", name)\n    doc.save()\n' }],
+      id: 'FR-061', shouldHave: true,
+    },
+    {
+      name: 'FR-062 (a) **kwargs forwarded to get_list fires',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef get_any(**kwargs):\n    return frappe.get_list("Sales Order", **kwargs)\n' }],
+      id: 'FR-062', shouldHave: true,
+    },
+    {
+      name: 'FR-062 (b) ignore_validate param reaching save fires',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef save_doc(name, ignore_validate=False):\n    doc = frappe.get_doc("Sales Order", name)\n    doc.save(ignore_validate=ignore_validate)\n' }],
+      id: 'FR-062', shouldHave: true,
+    },
+    {
+      name: 'FR-062 (c) ignore_permissions param that never reaches the ORM does not fire',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef echo(ignore_permissions=False):\n    return {"ignored": ignore_permissions}\n' }],
+      id: 'FR-062', shouldHave: false,
+    },
+    {
+      name: 'FR-062 (d) self.ignore_linked_doctypes attribute is not a parameter and does not fire',
+      files: [{ path: 'sales_order.py', content: 'class SalesOrder(Document):\n    def on_cancel(self):\n        self.ignore_linked_doctypes = ("GL Entry", "Stock Ledger Entry")\n        super().on_cancel()\n' }],
+      id: 'FR-062', shouldHave: false,
+    },
+    {
+      name: 'FR-063 (a) exists then insert of a different doctype does not fire',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef make_invoice(order):\n    if not frappe.db.exists("Sales Order", order):\n        return None\n    return frappe.get_doc({"doctype": "Sales Invoice", "sales_order": order}).insert()\n' }],
+      id: 'FR-063', shouldHave: false,
+    },
+    {
+      name: 'FR-063 (b) exists with no insert does not fire',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef has_device(serial_no):\n    return bool(frappe.db.exists("Device", {"serial_no": serial_no}))\n' }],
+      id: 'FR-063', shouldHave: false,
+    },
+    {
+      name: 'FR-063 (c) exists then new_doc + insert fires',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef register(serial_no):\n    if frappe.db.exists("Device", {"serial_no": serial_no}):\n        return None\n    doc = frappe.new_doc("Device")\n    doc.serial_no = serial_no\n    doc.insert()\n' }],
+      id: 'FR-063', shouldHave: true,
+    },
+    {
+      name: 'FR-063 (d) check-then-insert in a seed file does not fire (idempotent-seed idiom)',
+      files: [{ path: 'my_app/demo/seed.py', content: 'def ensure_uoms():\n    for name in ("Kg", "Nos"):\n        if not frappe.db.exists("UOM", name):\n            frappe.get_doc({"doctype": "UOM", "uom_name": name}).insert()\n' }],
+      id: 'FR-063', shouldHave: false,
+    },
+    {
+      name: 'FR-064 (a) auto_commit_on_many_writes fires',
+      files: [{ path: 'tasks.py', content: 'def bulk():\n    frappe.db.auto_commit_on_many_writes = True\n' }],
+      id: 'FR-064', shouldHave: true,
+    },
+    {
+      name: 'FR-064 (b) db_set(commit=True) in a patch file does not fire',
+      files: [{ path: 'my_app/patches/v1_0/fix_status.py', content: 'def execute():\n    doc = frappe.get_doc("Item", "X")\n    doc.db_set("status", "Active", commit=True)\n' }],
+      id: 'FR-064', shouldHave: false,
+    },
+    {
+      name: 'FR-065 (a) ssl.CERT_NONE fires',
+      files: [{ path: 'tasks.py', content: 'import ssl\n\ndef ctx():\n    return ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT, cert_reqs=ssl.CERT_NONE)\n' }],
+      id: 'FR-065', shouldHave: true,
+    },
+    {
+      name: 'FR-065 (b) verify=False in a test file does not fire',
+      files: [{ path: 'my_app/tests/test_api.py', content: 'def test_fetch():\n    return requests.get("http://localhost", verify=False)\n' }],
+      id: 'FR-065', shouldHave: false,
+    },
+    {
+      name: 'FR-065 (c) verify=False mentioned in a string does not fire',
+      files: [{ path: 'tasks.py', content: 'msg = "never pass verify=False to requests"\n' }],
+      id: 'FR-065', shouldHave: false,
+    },
+    {
+      name: 'FR-066 (a) md5 result compared with == fires',
+      files: [{ path: 'auth.py', content: 'def check(token, stored):\n    return hashlib.md5(token.encode()).hexdigest() == stored\n' }],
+      id: 'FR-066', shouldHave: true,
+    },
+    {
+      name: 'FR-066 (b) two hash variables compared with == fires',
+      files: [{ path: 'auth.py', content: 'def check(stored_hash, computed_hash):\n    return stored_hash == computed_hash\n' }],
+      id: 'FR-066', shouldHave: true,
+    },
+    {
+      name: 'FR-066 (c) password compared with an empty string does not fire',
+      files: [{ path: 'auth.py', content: 'def check(password):\n    return password == ""\n' }],
+      id: 'FR-066', shouldHave: false,
+    },
+    {
+      name: 'FR-066 (d) hmac.compare_digest does not fire',
+      files: [{ path: 'auth.py', content: 'def check(a, b):\n    return hmac.compare_digest(a, b)\n' }],
+      id: 'FR-066', shouldHave: false,
+    },
+    {
+      name: 'FR-067 (a) uuid.uuid1 for a token fires',
+      files: [{ path: 'auth.py', content: 'def new_token():\n    token = str(uuid.uuid1())\n    return token\n' }],
+      id: 'FR-067', shouldHave: true,
+    },
+    {
+      name: 'FR-067 (b) bare import random does not fire',
+      files: [{ path: 'auth.py', content: 'import random\n\ndef pick(items):\n    return random.choice(items)\n' }],
+      id: 'FR-067', shouldHave: false,
+    },
+    {
+      name: 'FR-067 (c) random.randint for a non-security variable does not fire',
+      files: [{ path: 'tasks.py', content: 'def roll():\n    count = random.randint(1, 10)\n    return count\n' }],
+      id: 'FR-067', shouldHave: false,
+    },
+    {
+      name: 'FR-069 (a) += on a document field in validate fires',
+      files: [{ path: 'sales_order.py', content: 'class SalesOrder(Document):\n    def validate(self):\n        for row in self.items:\n            self.total += row.amount\n' }],
+      id: 'FR-069', shouldHave: true,
+    },
+    {
+      name: 'FR-069 (b) self-referential assignment in on_update is FR-037 territory, not FR-069',
+      files: [{ path: 'sales_order.py', content: 'class SalesOrder(Document):\n    def on_update(self):\n        self.total = self.total * 1.1\n' }],
+      id: 'FR-069', shouldHave: false,
+    },
+    {
+      name: 'FR-069 (c) self.flags assignment in validate does not fire',
+      files: [{ path: 'sales_order.py', content: 'class SalesOrder(Document):\n    def validate(self):\n        self.flags.ignore_validate = True\n' }],
+      id: 'FR-069', shouldHave: false,
+    },
+    {
+      name: 'FR-070 (a) except with only log_error around a write fires',
+      files: [{ path: 'tasks.py', content: 'def sync(doc):\n    try:\n        doc.save()\n    except Exception:\n        frappe.log_error("sync failed")\n' }],
+      id: 'FR-070', shouldHave: true,
+    },
+    {
+      name: 'FR-070 (b) except that rolls back and passes does not fire',
+      files: [{ path: 'tasks.py', content: 'def sync(doc):\n    try:\n        doc.save()\n    except Exception:\n        frappe.db.rollback()\n        pass\n' }],
+      id: 'FR-070', shouldHave: false,
+    },
+    {
+      name: 'FR-070 (c) except pass around a read only does not fire',
+      files: [{ path: 'tasks.py', content: 'def load(name):\n    try:\n        return frappe.db.get_value("Item", name, "price")\n    except Exception:\n        pass\n' }],
+      id: 'FR-070', shouldHave: false,
+    },
+    {
+      name: 'FR-070 (d) except continue around a write in a loop fires',
+      files: [{ path: 'tasks.py', content: 'def sync_all(docs):\n    for doc in docs:\n        try:\n            doc.save()\n        except Exception:\n            continue\n' }],
+      id: 'FR-070', shouldHave: true,
+    },
+    {
+      name: 'FR-071 (a) bare return in permission_query_conditions fires',
+      files: [{ path: 'my_app/hooks.py', content: 'def permission_query_conditions(user):\n    if user == "Administrator":\n        return "1=1"\n    return\n' }],
+      id: 'FR-071', shouldHave: true,
+    },
+    {
+      name: 'FR-071 (b) if/else chain where every branch returns a condition does not fire',
+      files: [{ path: 'my_app/hooks.py', content: 'def permission_query_conditions(user):\n    if user == "Administrator":\n        return "1=1"\n    else:\n        return "(`tabSales Order`.owner = \'{0}\')".format(user)\n' }],
+      id: 'FR-071', shouldHave: false,
+    },
+    {
+      name: 'FR-071 (c) permission_query_conditions falling through to the end fires',
+      files: [{ path: 'my_app/hooks.py', content: 'def permission_query_conditions(user):\n    if user == "Administrator":\n        return "1=1"\n' }],
+      id: 'FR-071', shouldHave: true,
+    },
+    {
+      name: 'FR-071 (d) return None in permission_query_conditions fires',
+      files: [{ path: 'my_app/hooks.py', content: 'def permission_query_conditions(user):\n    return None\n' }],
+      id: 'FR-071', shouldHave: true,
+    },
+    {
+      name: 'FR-072 (a) doc.set_value("status", ...) fires',
+      files: [{ path: 'tasks.py', content: 'def close(doc):\n    doc.set_value("status", "Closed")\n' }],
+      id: 'FR-072', shouldHave: true,
+    },
+    {
+      name: 'FR-072 (b) db_set("docstatus", ...) fires',
+      files: [{ path: 'tasks.py', content: 'def cancel(doc):\n    doc.db_set("docstatus", 2)\n' }],
+      id: 'FR-072', shouldHave: true,
+    },
+    {
+      name: 'FR-072 (c) set_value with a dict field argument does not fire',
+      files: [{ path: 'tasks.py', content: 'def close(name):\n    frappe.db.set_value("Sales Order", name, {"status": "Closed"})\n' }],
+      id: 'FR-072', shouldHave: false,
+    },
+    {
+      name: 'FR-074 (a) doc.update(frappe.form_dict) fires',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef update_doc(name):\n    doc = frappe.get_doc("Sales Order", name)\n    doc.update(frappe.form_dict)\n    doc.save()\n' }],
+      id: 'FR-074', shouldHave: true,
+    },
+    {
+      name: 'FR-074 (b) frappe.get_doc(json.loads(...)) fires',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef load_doc():\n    return frappe.get_doc(json.loads(frappe.form_dict.get("doc")))\n' }],
+      id: 'FR-074', shouldHave: true,
+    },
+    {
+      name: 'FR-074 (c) .update(param) in a non-whitelisted function does not fire',
+      files: [{ path: 'api.py', content: 'def apply(doc, data):\n    doc.update(data)\n' }],
+      id: 'FR-074', shouldHave: false,
+    },
+    {
+      name: 'FR-075 (a) redirect to a next parameter fires',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef login_next(next):\n    frappe.local.flags.redirect = next\n' }],
+      id: 'FR-075', shouldHave: true,
+    },
+    {
+      name: 'FR-075 (b) redirect with a startswith validation call does not fire',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef login_next():\n    target = frappe.form_dict.get("next")\n    if target.startswith("/"):\n        frappe.local.flags.redirect = target\n' }],
+      id: 'FR-075', shouldHave: false,
+    },
+    {
+      name: 'FR-075 (c) redirect to a variable assigned from form_dict fires',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef login_next():\n    target = frappe.form_dict.get("next")\n    frappe.local.flags.redirect = target\n' }],
+      id: 'FR-075', shouldHave: true,
+    },
+    {
+      name: 'FR-076 (a) urlopen with a form_dict URL fires',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef fetch():\n    url = frappe.form_dict.get("url")\n    return urllib.request.urlopen(url)\n' }],
+      id: 'FR-076', shouldHave: true,
+    },
+    {
+      name: 'FR-076 (b) requests.get with a parameter in a non-whitelisted function does not fire',
+      files: [{ path: 'api.py', content: 'def fetch(url):\n    return requests.get(url)\n' }],
+      id: 'FR-076', shouldHave: false,
+    },
+    {
+      name: 'FR-076 (c) requests.get with a literal URL does not fire',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef fetch():\n    return requests.get("https://api.example.com/status")\n' }],
+      id: 'FR-076', shouldHave: false,
+    },
+  ];
+  for (const t of regression5) {
+    const result = checkFiles(t.files, rulesData);
+    const ok = has(result, t.id) === t.shouldHave;
+    if (ok) { passed++; console.log(`PASS ${t.name}`); }
+    else {
+      failed++;
+      failures.push(`${t.name}: expected ${t.id} ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
+      console.log(`FAIL ${t.name}: expected ${t.id} ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
+    }
+  }
+}
+
+// FR-063 (e): with two exists checks for the same doctype, only the
+// nearest one (the guard of the insert) fires, at its line.
+{
+  const files = [{ path: 'tasks.py', content: 'def run():\n    for batch_ref in runs:\n        if frappe.db.exists("Batch", batch_ref):\n            blends.append(batch_ref)\n            continue\n        if not frappe.db.exists("Batch", batch_ref):\n            frappe.get_doc({"doctype": "Batch", "batch_id": batch_ref}).insert()\n' }];
+  const result = checkFiles(files, rulesData);
+  const hits = result.findings.filter((f) => f.ruleId === 'FR-063');
+  const ok = hits.length === 1 && hits[0].line === 6;
+  if (ok) { passed++; console.log('PASS FR-063 (e) two exists checks: only the nearest guard fires, at line 6'); }
+  else {
+    failed++;
+    failures.push(`FR-063 (e): expected one FR-063 at line 6 (got: ${hits.map((f) => f.line).join(',') || 'none'})`);
+    console.log(`FAIL FR-063 (e): expected one FR-063 at line 6 (got: ${hits.map((f) => f.line).join(',') || 'none'})`);
   }
 }
 

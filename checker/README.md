@@ -1,7 +1,7 @@
 # Frappe Sensei — Checker Engine
 
-The checker implements all 59 rules in `../rules/rules.json` (FR-001 to
-FR-059) as a pure, dependency-free ES module. It reads code only — it never
+The checker implements all 74 rules in `../rules/rules.json` (FR-001 to
+FR-076, skipping FR-068, FR-073 and FR-077) as a pure, dependency-free ES module. It reads code only — it never
 runs it, sends it anywhere, or stores it.
 
 ## Files
@@ -243,6 +243,89 @@ any failure.
 - **FR-059 (`set_user` without restoration):** a `finally` block
   restores the user only if it contains another `set_user(` call.
   A `try`/`except` with no `finally` still fires.
+- **FR-060 (untyped ORM parameter):** a parameter is container-capable
+  when it has no annotation, a `dict`/`list` annotation (including a
+  union with `dict`/`list`), a string annotation, or a `dict`/`list`
+  default. With `from __future__ import annotations` every annotation
+  is a string at runtime, so all parameters count as container-capable.
+  `frappe.get_query` is NOT a sink — it takes its own filters and
+  applies its own permission handling. Only whitelisted functions are
+  checked.
+- **FR-061 (write behind a GET):** only the single-line decorator form
+  is seen; a multi-line decorator with `methods=` on a later line does
+  not fire.
+- **FR-062 (client-settable `ignore_*`):** only parameters named
+  `ignore_*` are checked. An `ignore_*` attribute
+  (`self.ignore_linked_doctypes`) is not a parameter and does not fire.
+  A `**kwargs` forward is detected only when `**kwargs` appears on the
+  same line as the call; a multi-line forward does not fire.
+- **FR-063 (check-then-insert race):** the insert must be guarded by
+  the exists check — inside the `if not exists(...)` body, or after an
+  `if exists(...): return / continue` early exit in the same block.
+  When several exists checks for the same doctype precede the insert,
+  only the nearest one (the actual guard) fires. Demo / seed / test
+  files are exempt — a seed script's check-then-insert is the
+  idempotent-seed idiom, run once. (Narrowed before pushing: the first
+  version fired on any insert later in the same function, which
+  misattributed the FMC seed file's `exists("Batch")` skip-guard to a
+  Batch insert guarded by a second, later exists check.)
+- **FR-064 (`db_set` commit):** exempt in patch files (a path
+  containing `/patches/`).
+- **FR-065 (TLS verification off):** string literals are stripped
+  before checking, so a message mentioning `verify=False` does not
+  fire. Test files are exempt.
+- **FR-066 (weak hash):** a variable named `cache` / `etag` /
+  `checksum` (a cache key or checksum, not a secret) does not fire,
+  and `password == ""` does not fire. `hmac.compare_digest` never
+  fires.
+- **FR-067 (weak token):** only assignments to a variable named token
+  / secret / password / invite / reset / otp / nonce / api key /
+  session fire. A bare `import random` does not fire. Test files are
+  exempt.
+- **FR-069 (self-referential assignment in validate):** fires on an
+  assignment whose right-hand side reads the same field, and on any
+  augmented assignment (`+=`, `-=`, `*=`, `/=`) on a document field
+  in `validate` / `before_save` / `before_validate` / `on_change`.
+  `self.flags.*` assignments are exempt. An assignment guarded by
+  `if self.is_new()` still fires — the checker cannot tell a
+  first-save-only assignment from a compounding one; add a `# noqa`
+  if the assignment really is first-save-only.
+- **FR-070 (silent except around a write):** the except body must be
+  only `pass` / `continue` / `frappe.log_error(...)`. An except that
+  re-raises or rolls back does not fire. The write must be in the
+  `try` body of the same `try`/`except`, not in an `else:` block.
+- **FR-071 (`permission_query_conditions` returning "" / None):**
+  checked only in `hooks.py` itself, inside a `def` named
+  `permission_query_conditions`. Same fall-through analysis as FR-040
+  (now a shared helper). FR-040 does not check this hook.
+- **FR-072 (direct docstatus / status write):** a dict field argument
+  (`set_value(..., {"status": ...})`) is not a literal field name and
+  does not fire. The rule flags the mechanism, so it also fires on
+  deliberate core patterns — ERPNext `sales_order.py` has two
+  (a cross-document status sync in `update_enquiry_status`, and
+  `self.db_set("status", "Cancelled")` in `on_cancel`).
+- **FR-074 (mass assignment):** `.update()` with a literal dict does
+  not fire. The bare-parameter form (`.update(<param>)`) is checked
+  only in whitelisted functions.
+- **FR-075 (open redirect):** the target must be a request value
+  directly, or a variable assigned from one in the same function.
+  A validation call (`startswith(`, `urlparse(`, `is_safe`) anywhere
+  in the function exempts the whole function. Python only — JS
+  `frappe.set_route` is not checked.
+- **FR-076 (SSRF):** a parameter counts as request-controlled only in
+  a whitelisted function. A URL from `frappe.conf` or a settings value
+  (`get_single_value` / `get_cached_value`) does not fire.
+- **Skipped second-pass candidates (no rule):** #25 (`set_value` on a
+  child-table doctype) — a static check cannot tell a child-table
+  doctype from a parent one without the DocType JSON, and ERPNext core
+  itself writes bookkeeping fields directly to child rows; #30
+  (whitelist with no `methods=`) — would fire on nearly all existing
+  Frappe code, and the dangerous forms are already FR-060 and FR-061;
+  #34 (Custom Field fieldname with no app-specific prefix) — the
+  app's own convention is not always its folder name (FMC uses `fm_`,
+  not `food_manufacturing_`), so no reliable static prefix exists.
+  The IDs that would have been theirs (FR-068, FR-073, FR-077) are
+  left unused.
 - **FR-041 (`cur_frm`):** string literals are stripped before
   checking, and `//` comment lines are skipped, so a message or a
   comment mentioning `cur_frm` does not fire.
