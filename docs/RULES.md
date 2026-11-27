@@ -1,12 +1,14 @@
-# Frappe Sensei — MVP Review Rules (Phase 1)
+# Frappe Sensei — Review Rules
 
-35 deterministic, statically checkable rules. The checker reads code only — it never runs it, and nothing is stored.
+43 deterministic, statically checkable rules. The checker reads code only — it never runs it, and nothing is stored.
 
-Source: `frappe_core_skills` v2.3.0 — [irfanzahoor/frappe_core_skills](https://github.com/irfanzahoor/frappe_core_skills). The machine-readable form of these rules is `rules/rules.json`.
+Source: `frappe_core_skills` v2.3.0 — [irfanzahoor/frappe_core_skills](https://github.com/irfanzahoor/frappe_core_skills) — for FR-001 to FR-035. FR-036 to FR-043 come from the Impertio-Studio/Frappe_Claude_Skill_Package review (61 skills, 2026-11-27); only the rule ideas were borrowed, in our own wording — their licence is inconsistent (README/package.json say MIT, LICENSE.md is LGPL v3), so no text was copied. The machine-readable form of these rules is `rules/rules.json`.
 
 Severity follows `agents/frappe-reviewer.md`: **blocker** = wrong placement, JS-only validation, missing permission check, SQL injection risk, `frappe.db.commit()` in a request; **major** = untranslated strings, `raise Exception`, N+1 query, `["*"]` fields, duplicate handlers; **minor** = style, missing `flt`/`cint`, field behaviour set in JS that belongs in the DocType.
 
-## All 35 rules
+Totals: 43 rules — 11 blocker, 21 major, 11 minor. Categories: Placement 7, Framework APIs 14, Server vs Client 4, Security 10, Performance 8.
+
+## All 43 rules
 
 | ID | Severity | Category | Title | Source |
 |----|----------|----------|-------|--------|
@@ -45,6 +47,29 @@ Severity follows `agents/frappe-reviewer.md`: **blocker** = wrong placement, JS-
 | FR-033 | minor | performance | Slow work in a request without frappe.enqueue | skills/frappe-performance/SKILL.md |
 | FR-034 | minor | performance | Master data read without caching | skills/frappe-performance/SKILL.md |
 | FR-035 | minor | performance | Name-only list fetched without pluck | skills/frappe-performance/SKILL.md |
+| FR-036 | blocker | apis | self.save() inside validate / before_save / on_update | Impertio — docs/reference/controllers/anti-patterns.md (Recursive Save) |
+| FR-037 | major | apis | Field assigned in on_update is never saved | Impertio — docs/reference/controllers/anti-patterns.md (Changes after on_update) |
+| FR-038 | major | apis | Overridden validate() without super().validate() | Impertio — skills/source/syntax/frappe-syntax-controllers/SKILL.md |
+| FR-039 | blocker | security | frappe.throw() or raise inside a permission hook | Impertio — skills/source/errors/frappe-errors-permissions/SKILL.md |
+| FR-040 | major | security | return True inside a has_permission hook | Impertio — skills/source/errors/frappe-errors-permissions/references/anti-patterns.md |
+| FR-041 | minor | apis | cur_frm used in client script | Impertio — skills/source/errors/frappe-errors-clientscripts/SKILL.md |
+| FR-042 | major | security | eval() or exec() in Python code | Impertio — skills/source/syntax/frappe-syntax-serverscripts/references/anti-patterns.md |
+| FR-043 | minor | performance | frappe.enqueue() without queue= | Impertio — skills/source/impl/frappe-impl-scheduler/SKILL.md |
+
+## Rule changes — 8 new rules from the Impertio review (2026-11-27)
+
+The [Impertio-Studio/Frappe_Claude_Skill_Package](https://github.com/Impertio-Studio/Frappe_Claude_Skill_Package) review (61 skills, verified by cloning) contributed 8 more deterministic rules, FR-036 to FR-043, taking the tool from 35 to 43 checks. Only the rule ideas were taken; every title, description, example and fix is written in our own words, because the package's licence is inconsistent (its README/package.json say MIT, its LICENSE.md is LGPL v3).
+
+- **FR-036 (blocker):** `.save()` on `self`/`doc` inside `validate`, `before_save` or `on_update` re-enters the same hook forever. A flags-based recursion guard (`self.flags`) in the method exempts it.
+- **FR-037 (major):** assigning `self.<field>` in `on_update` is lost — the document is already saved. `self.flags.*` assignments and `self.db_set(...)` calls are exempt.
+- **FR-038 (major):** an overridden `validate()` in a DocType controller class with no `super().validate()` call. Scoped to controller classes (inheriting from `Document` directly or through a `*Controller` base); a `validate` in a plain class does not fire.
+- **FR-039 (blocker):** `frappe.throw()` or `raise` inside a `has_permission` or `permission_query_conditions` function in `hooks.py` — it breaks all access to the DocType.
+- **FR-040 (major):** `return True` inside a `has_permission` function in `hooks.py` — a permission hook can only deny, never grant.
+- **FR-041 (minor):** `cur_frm` in a `.js` file — undefined in list/report contexts; use the `frm` parameter.
+- **FR-042 (major):** `eval()` / `exec()` in Python code. String literals are stripped before checking, so a message mentioning `eval` does not fire.
+- **FR-043 (minor):** `frappe.enqueue(...)` with no `queue=` keyword argument. Multi-line calls are joined before checking.
+
+None of the 8 fires on ERPNext `sales_order.py` (still 8 findings) or on the 6 FMC files (still 4 findings, the known FR-023 cross-file delegates) — both re-runs were done before pushing.
 
 ## Rule changes — FR-023 and FR-032 narrowed (2026-11-27)
 
@@ -108,7 +133,7 @@ reveals the markdown report at any time.
 
 ## Out of scope for Phase 1
 
-These were read in the v2.3.0 skills but are **not** in these 35 rules, because they are not deterministic static code checks:
+These were read in the v2.3.0 skills but are **not** in these 43 rules, because they are not deterministic static code checks:
 
 - **frappe-studio / frappe-flow / frappe-insights** — all five new v2.3.0 skills were fetched and read. Studio, Flow and Insights are config and product guidance (export to git, one agent one job, never share salary data on a public dashboard), not code patterns the checker can flag. No rule was invented from them.
 - **frappe-data** — backup-before-delete, preview-before-import and test-on-staging are process rules, not code patterns. Its one code rule (never raw SQL deletes / writes) is already covered by FR-022.
@@ -121,6 +146,6 @@ These were read in the v2.3.0 skills but are **not** in these 35 rules, because 
 
 1. Edit `rules/rules.json` only — it is the single source of truth. Never edit this table by hand; regenerate it from `rules.json`.
 2. Every rule needs a `source` file in `frappe_core_skills` (skill file, reference, agent or command) and a `pattern` concrete enough to implement in JavaScript (regex, AST node, or file-structure check).
-3. Keep the ID sequence FR-001 to FR-035 in order: category first, then severity (blocker, major, minor). New rules go at the end with the next free ID; never reuse or renumber an old ID.
+3. Keep the ID sequence FR-001 to FR-043 in order: category first, then severity (blocker, major, minor). New rules go at the end with the next free ID; never reuse or renumber an old ID.
 4. Keep severity aligned with `agents/frappe-reviewer.md`. Do not upgrade a minor to a blocker to make a report look stronger.
 5. Validate before pushing: `python3 -m json.tool rules/rules.json` must pass, the count must be exactly the number in this file's table, and every rule must have all 11 fields (`id`, `category`, `severity`, `title`, `description`, `pattern`, `example_bad`, `example_good`, `fix`, `source`, `versions`).

@@ -48,6 +48,14 @@ export const RULES = [
   { id: 'FR-033', severity: 'minor', category: 'performance', title: 'Slow work in a request without frappe.enqueue', fix: 'Move slow work to frappe.enqueue with a queue and timeout.' },
   { id: 'FR-034', severity: 'minor', category: 'performance', title: 'Master data read without caching', fix: 'Use frappe.get_cached_value or get_value with cache=True for rarely-changing masters.' },
   { id: 'FR-035', severity: 'minor', category: 'performance', title: 'Name-only list fetched without pluck', fix: "Use pluck='name' for simple lists of names." },
+  { id: 'FR-036', severity: 'blocker', category: 'apis', title: 'self.save() inside validate / before_save / on_update', fix: 'Never call .save() from validate, before_save or on_update; use self.db_set() for a single field, or move the work to after_save or a background job.' },
+  { id: 'FR-037', severity: 'major', category: 'apis', title: 'Field assigned in on_update is never saved', fix: 'Set the field in validate or before_save, or use self.db_set() in on_update.' },
+  { id: 'FR-038', severity: 'major', category: 'apis', title: 'Overridden validate() without super().validate()', fix: 'Call super().validate() first in every overridden validate().' },
+  { id: 'FR-039', severity: 'blocker', category: 'security', title: 'frappe.throw() or raise inside a permission hook', fix: 'Never throw or raise in a permission hook; return False to deny and None to defer to the standard permission system.' },
+  { id: 'FR-040', severity: 'major', category: 'security', title: 'return True inside a has_permission hook', fix: 'Return None to let the standard permission system decide, and False to deny; never return True.' },
+  { id: 'FR-041', severity: 'minor', category: 'apis', title: 'cur_frm used in client script', fix: 'Use the frm parameter passed to every form event handler instead of cur_frm.' },
+  { id: 'FR-042', severity: 'major', category: 'security', title: 'eval() or exec() in Python code', fix: 'Parse data with frappe.parse_json or json.loads instead of eval/exec; legitimate uses in Frappe apps are near-zero.' },
+  { id: 'FR-043', severity: 'minor', category: 'performance', title: 'frappe.enqueue() without queue=', fix: "Always pass queue= explicitly — 'short', 'default' or 'long' — to frappe.enqueue()." },
 ];
 
 const OTHER_APP_RE = /(^|\/)apps\/(frappe|erpnext|hrms|crm|helpdesk)\//;
@@ -385,6 +393,10 @@ export function checkFiles(files, rulesInput) {
         if (/frappe\.db\.get_value\(\s*['"](?:Company|[^'"]*\sSettings)['"]/.test(line) && !/cache\s*=\s*True/.test(line)) add('FR-034', path, i);
         // FR-035: name-only list without pluck.
         if (/frappe\.get_all\(\s*[^)]*fields\s*=\s*\[\s*['"]name['"]\s*\]/.test(line) && !/pluck\s*=/.test(line)) add('FR-035', path, i);
+        // FR-042: eval() / exec() in Python code. Check the line with
+        // string literals removed, so a message mentioning eval does not
+        // flag; a real call still does.
+        if (/\b(?:eval|exec)\s*\(/.test(stripStrings(line))) add('FR-042', path, i);
       }
       // Loop-aware Python checks (FR-030, FR-031) — indentation tracking.
       // Demo / seed / test files insert demo data in loops by design, so
@@ -446,6 +458,27 @@ export function checkFiles(files, rulesInput) {
           if (iter && dbVars.has(iter) && dbVars.get(iter) < i) add('FR-032', path, i);
         }
       }
+      // FR-043: frappe.enqueue() without an explicit queue= keyword.
+      // Multi-line calls are joined (parens balanced) before checking,
+      // since queue= usually sits on its own line.
+      {
+        for (let i = 0; i < lines.length; i++) {
+          if (isCommentPy(lines[i])) continue;
+          const start = stripStrings(lines[i]).indexOf('frappe.enqueue(');
+          if (start === -1) continue;
+          let callText = stripStrings(lines[i]).slice(start);
+          let depth = (callText.match(/\(/g) || []).length - (callText.match(/\)/g) || []).length;
+          let k = i;
+          while (depth > 0 && k + 1 < lines.length && k - i < 10) {
+            k++;
+            const next = stripStrings(lines[k]);
+            callText += '\n' + next;
+            depth += (next.match(/\(/g) || []).length - (next.match(/\)/g) || []).length;
+          }
+          if (!/\bqueue\s*=/.test(callText)) add('FR-043', path, i);
+          i = k; // skip the joined continuation lines
+        }
+      }
       // FR-023 / FR-024 / FR-033 — per whitelisted function.
       {
         const fns = parsePyFunctions(lines);
@@ -502,6 +535,54 @@ export function checkFiles(files, rulesInput) {
           }
         }
       }
+      // FR-036 / FR-037 / FR-038 — controller lifecycle methods.
+      {
+        const fns = parsePyFunctions(lines);
+        for (const fn of fns) {
+          if (!fn.isDocumentClass) continue;
+          const bodyText = fn.bodyLines.map((b) => b.text).join('\n');
+          if (fn.name === 'validate' || fn.name === 'before_save' || fn.name === 'on_update') {
+            // FR-036: .save() inside validate / before_save / on_update
+            // re-enters the same hook forever. A flags-based recursion
+            // guard (self.flags...) in the method exempts it.
+            if (!/self\.flags\b/.test(bodyText)) {
+              const saveLine = fn.bodyLines.find((b) => !isCommentPy(b.text) && /(?:self|doc)\.save\s*\(/.test(b.text));
+              if (saveLine) add('FR-036', path, saveLine.line);
+            }
+          }
+          if (fn.name === 'on_update') {
+            // FR-037: assigning self.<field> in on_update is lost — the
+            // document is already saved. self.flags.* assignments and
+            // self.db_set(...) calls are exempt. The (?!=) keeps a
+            // comparison (self.x == 1) from firing.
+            for (const b of fn.bodyLines) {
+              if (isCommentPy(b.text)) continue;
+              const m = /^\s*self\.([A-Za-z_][A-Za-z0-9_]*)\s*(?:\+|-|\*|\/)?=(?!=)/.exec(b.text);
+              if (m && m[1] !== 'flags') add('FR-037', path, b.line);
+            }
+          }
+          if (fn.name === 'validate') {
+            // FR-038: overridden validate() without super().validate().
+            if (!/super\(\)\.validate\s*\(/.test(bodyText)) add('FR-038', path, fn.line);
+          }
+        }
+      }
+      // FR-039 / FR-040 — permission hooks in hooks.py only. A hook
+      // function defined in a separate permissions module is not seen
+      // here; only the defs in hooks.py itself are checked.
+      if (isHooks) {
+        const fns = parsePyFunctions(lines);
+        for (const fn of fns) {
+          if (fn.name !== 'has_permission' && fn.name !== 'permission_query_conditions') continue;
+          for (const b of fn.bodyLines) {
+            if (isCommentPy(b.text)) continue;
+            // FR-039: throwing in a permission hook breaks ALL access.
+            if (/frappe\.throw\s*\(/.test(b.text) || /^\s*raise\b/.test(b.text)) add('FR-039', path, b.line);
+            // FR-040: return True in has_permission grants nothing.
+            if (fn.name === 'has_permission' && /^\s*return\s+True\b/.test(b.text)) add('FR-040', path, b.line);
+          }
+        }
+      }
     }
 
     if (isJs(path)) {
@@ -529,6 +610,10 @@ export function checkFiles(files, rulesInput) {
         // FR-028: check on the line with string literals removed, so a
         // fix string mentioning .html() does not flag.
         if (/\.html\(\s*(?:frm\.doc|doc|user|frm|[^)]*(?:notes|remarks|input|content))\b/.test(stripStrings(line))) add('FR-028', path, i);
+        // FR-041: cur_frm is undefined outside the form (list/report
+        // contexts). Check with string literals removed, so a message
+        // mentioning cur_frm does not flag.
+        if (/\bcur_frm\b/.test(stripStrings(line))) add('FR-041', path, i);
       }
       // FR-005: duplicate frappe.ui.form.on per DocType in one file.
       {

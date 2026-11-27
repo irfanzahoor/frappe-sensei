@@ -1,6 +1,6 @@
 // Frappe Sensei — checker tests (plain Node, no npm install).
 // Run: node checker/checker.test.mjs
-// For EVERY rule (FR-001..FR-035) it runs a bad example (must produce
+// For EVERY rule (FR-001..FR-043) it runs a bad example (must produce
 // that ruleId) and a good example (must NOT produce that ruleId).
 // Bad/good snippets come from rules/rules.json where they are complete;
 // cross-file rules (FR-018, FR-019) and path-dependent rules (FR-002,
@@ -37,8 +37,10 @@ function filesFor(id, kind) {
         : [{ path: 'my_app/my_app/overrides/sales_order.py', content: good }];
     case 'FR-003':
       return [{ path: 'my_app/hooks.py', content }];
-    case 'FR-004': case 'FR-005': case 'FR-012': case 'FR-020': case 'FR-021': case 'FR-028':
+    case 'FR-004': case 'FR-005': case 'FR-012': case 'FR-020': case 'FR-021': case 'FR-028': case 'FR-041':
       return [js];
+    case 'FR-039': case 'FR-040':
+      return [{ path: 'my_app/hooks.py', content }];
     case 'FR-007':
       return kind === 'bad'
         ? [{ path: 'my_app/custom_field.py', content: bad }]
@@ -275,6 +277,78 @@ for (const rule of rulesData.rules) {
       failed++;
       failures.push('FR-031 seed exemption: demo/seed.py loop still produced FR-031');
       console.log('FAIL FR-031 seed exemption: demo/seed.py loop still produced FR-031');
+    }
+  }
+}
+
+// Regression tests for the Impertio rules (FR-036 to FR-043, 2026-11-27):
+// the exemptions and multi-line cases the bad/good examples do not cover.
+{
+  const regression3 = [
+    {
+      name: 'FR-036 (a) self.save() in validate still fires (recursion)',
+      files: [{ path: 'sales_order.py', content: 'from frappe.model.document import Document\n\nclass SalesOrder(Document):\n    def validate(self):\n        self.recalc()\n        self.save()\n' }],
+      id: 'FR-036', shouldHave: true,
+    },
+    {
+      name: 'FR-036 (b) flags-guarded save in on_update does not fire',
+      files: [{ path: 'sales_order.py', content: 'from frappe.model.document import Document\n\nclass SalesOrder(Document):\n    def on_update(self):\n        if self.flags.get("in_recursive_update"):\n            return\n        self.flags.in_recursive_update = True\n        self.save()\n' }],
+      id: 'FR-036', shouldHave: false,
+    },
+    {
+      name: 'FR-037 (a) self.flags assignment in on_update does not fire',
+      files: [{ path: 'sales_order.py', content: 'from frappe.model.document import Document\n\nclass SalesOrder(Document):\n    def on_update(self):\n        self.flags.in_recursive_update = True\n' }],
+      id: 'FR-037', shouldHave: false,
+    },
+    {
+      name: 'FR-037 (b) comparison self.x == 1 in on_update does not fire',
+      files: [{ path: 'sales_order.py', content: 'from frappe.model.document import Document\n\nclass SalesOrder(Document):\n    def on_update(self):\n        if self.status == "Done":\n            pass\n' }],
+      id: 'FR-037', shouldHave: false,
+    },
+    {
+      name: 'FR-038 (a) validate in a plain class (not a Document) does not fire',
+      files: [{ path: 'sales_order.py', content: 'class Validator:\n    def validate(self):\n        self.custom_check()\n' }],
+      id: 'FR-038', shouldHave: false,
+    },
+    {
+      name: 'FR-039 (a) raise inside permission_query_conditions in hooks.py still fires',
+      files: [{ path: 'my_app/hooks.py', content: 'def permission_query_conditions(user):\n    if not user:\n        frappe.throw("User required")\n' }],
+      id: 'FR-039', shouldHave: true,
+    },
+    {
+      name: 'FR-039 (b) frappe.throw in a has_permission hook in a separate module does not fire (hooks.py only)',
+      files: [{ path: 'my_app/permissions.py', content: 'def has_permission(doc, user, permission_type):\n    if doc.status == "Locked":\n        frappe.throw("Locked")\n' }],
+      id: 'FR-039', shouldHave: false,
+    },
+    {
+      name: 'FR-041 (a) cur_frm in a comment does not fire',
+      files: [{ path: 'sales_order.js', content: '// never use cur_frm here\nfrappe.ui.form.on("Sales Order", {\n    refresh(frm) {\n        frm.set_value("territory", "Default");\n    }\n});\n' }],
+      id: 'FR-041', shouldHave: false,
+    },
+    {
+      name: 'FR-042 (a) eval inside a string literal does not fire',
+      files: [{ path: 'sales_order.py', content: 'msg = "do not use eval() here"\n' }],
+      id: 'FR-042', shouldHave: false,
+    },
+    {
+      name: 'FR-043 (a) multi-line enqueue WITH queue= does not fire',
+      files: [{ path: 'sales_order.py', content: 'frappe.enqueue(\n    "my_app.tasks.send_report",\n    queue="long",\n    timeout=1800\n)\n' }],
+      id: 'FR-043', shouldHave: false,
+    },
+    {
+      name: 'FR-043 (b) multi-line enqueue WITHOUT queue= still fires',
+      files: [{ path: 'sales_order.py', content: 'frappe.enqueue(\n    "my_app.tasks.send_report",\n    timeout=1800\n)\n' }],
+      id: 'FR-043', shouldHave: true,
+    },
+  ];
+  for (const t of regression3) {
+    const result = checkFiles(t.files, rulesData);
+    const ok = has(result, t.id) === t.shouldHave;
+    if (ok) { passed++; console.log(`PASS ${t.name}`); }
+    else {
+      failed++;
+      failures.push(`${t.name}: expected ${t.id} ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
+      console.log(`FAIL ${t.name}: expected ${t.id} ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
     }
   }
 }

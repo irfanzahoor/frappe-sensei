@@ -1,5 +1,5 @@
 {
-  "description": "35 deterministic, statically checkable rules for the live /frappe-review web tool (MVP Phase 1). No rule runs code.",
+  "description": "43 deterministic, statically checkable rules for the live /frappe-review web tool (MVP Phase 1 + 8 rules from the Impertio-Studio/Frappe_Claude_Skill_Package review, 2026-11-27). No rule runs code.",
   "name": "frappe-sensei",
   "rules": [
     {
@@ -213,7 +213,7 @@
       "example_good": "group = frappe.db.get_value('Item', row.item_code, 'item_group')",
       "fix": "Use frappe.db.get_value or frappe.get_cached_value for single fields.",
       "id": "FR-013",
-      "pattern": "Python AST check: frappe.get_doc(<doctype>, <name>) followed by a plain field access (.field or [\"field\"]), with no other use of the document. A method call after get_doc (.set_status(), .save(), .insert(), .submit()) does not fire — that is an action on the document, not a single-field read. Creating a document does not fire: a dict first argument (creation form) means the document is being made, not read.",
+      "pattern": "Python AST check: frappe.get_doc(<doctype>, <name>) followed by a plain field access (.field or [\"field\"]), with no other use of the document. A method call after get_doc (.set_status(), .save(), .insert(), .submit()) does not fire \u2014 that is an action on the document, not a single-field read. Creating a document does not fire: a dict first argument (creation form) means the document is being made, not read.",
       "severity": "major",
       "source": "skills/frappe-core/SKILL.md",
       "title": "get_doc used for a single field",
@@ -383,7 +383,7 @@
       "example_good": "@frappe.whitelist()\ndef get_order_total(name):\n    doc = frappe.get_doc('Sales Order', name)\n    frappe.has_permission('Sales Order', 'read', doc, throw=True)\n    return doc.grand_total",
       "fix": "Check frappe.has_permission before returning or writing data in every whitelisted method.",
       "id": "FR-023",
-      "pattern": "Python AST check: a standalone module-level @frappe.whitelist() function, or a whitelisted method that fetches another document by a passed-in docname or id, whose body contains no frappe.has_permission(), doc.has_permission(), check_permission() or permission-aware frappe.get_list() call before its first return or write — in the function itself or in a helper it calls, directly or transitively, in the same submission; instance methods of a DocType controller class (first argument self, inside a class inheriting from Document directly or through a *Controller base) are exempt unless they fetch another document by a passed-in docname or id; a function that only reads frappe.get_roles() and performs no database read or write is also exempt.",
+      "pattern": "Python AST check: a standalone module-level @frappe.whitelist() function, or a whitelisted method that fetches another document by a passed-in docname or id, whose body contains no frappe.has_permission(), doc.has_permission(), check_permission() or permission-aware frappe.get_list() call before its first return or write \u2014 in the function itself or in a helper it calls, directly or transitively, in the same submission; instance methods of a DocType controller class (first argument self, inside a class inheriting from Document directly or through a *Controller base) are exempt unless they fetch another document by a passed-in docname or id; a function that only reads frappe.get_roles() and performs no database read or write is also exempt.",
       "severity": "blocker",
       "source": "skills/frappe-security/SKILL.md",
       "title": "Whitelisted method without a permission check",
@@ -591,6 +591,142 @@
       "severity": "minor",
       "source": "skills/frappe-performance/SKILL.md",
       "title": "Name-only list fetched without pluck",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "Calling .save() from inside validate, before_save or on_update re-enters the same lifecycle hook, so the document saves in an endless loop.",
+      "example_bad": "class SalesOrder(Document):\n    def on_update(self):\n        self.update_stock()\n        self.save()",
+      "example_good": "class SalesOrder(Document):\n    def on_update(self):\n        self.db_set('counter', (self.counter or 0) + 1, update_modified=False)",
+      "fix": "Never call .save() from validate, before_save or on_update; use self.db_set() for a single field, or move the work to after_save or a background job.",
+      "id": "FR-036",
+      "pattern": "Python AST check: a .save() call on self or doc inside the body of a validate, before_save or on_update method in a DocType controller; a flags-based recursion guard (self.flags) in the method exempts it.",
+      "severity": "blocker",
+      "source": "Impertio-Studio/Frappe_Claude_Skill_Package \u2014 docs/reference/controllers/anti-patterns.md (Recursive Save)",
+      "title": "self.save() inside validate / before_save / on_update",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "on_update runs after the document is already saved, so assigning self.<field> there changes the in-memory document only \u2014 the value never reaches the database.",
+      "example_bad": "class SalesOrder(Document):\n    def on_update(self):\n        self.status = 'Processed'",
+      "example_good": "class SalesOrder(Document):\n    def on_update(self):\n        self.db_set('status', 'Processed')",
+      "fix": "Set the field in validate or before_save, or use self.db_set() in on_update.",
+      "id": "FR-037",
+      "pattern": "Python AST check: an assignment to self.<field> inside def on_update; assignments to self.flags.* and self.db_set(...) calls are exempt.",
+      "severity": "major",
+      "source": "Impertio-Studio/Frappe_Claude_Skill_Package \u2014 docs/reference/controllers/anti-patterns.md (Changes after on_update)",
+      "title": "Field assigned in on_update is never saved",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "A controller that overrides validate() without calling super().validate() silently skips the parent class validation \u2014 ERPNext controller bases validate stock, pricing and more in the parent.",
+      "example_bad": "from erpnext.controllers.selling_controller import SellingController\n\nclass SalesOrder(SellingController):\n    def validate(self):\n        self.custom_check()",
+      "example_good": "from erpnext.controllers.selling_controller import SellingController\n\nclass SalesOrder(SellingController):\n    def validate(self):\n        super().validate()\n        self.custom_check()",
+      "fix": "Call super().validate() first in every overridden validate().",
+      "id": "FR-038",
+      "pattern": "Python AST check: a validate() method in a DocType controller class whose body contains no super().validate() call.",
+      "severity": "major",
+      "source": "Impertio-Studio/Frappe_Claude_Skill_Package \u2014 skills/source/syntax/frappe-syntax-controllers/SKILL.md",
+      "title": "Overridden validate() without super().validate()",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "Throwing inside a has_permission or permission_query_conditions hook breaks all access to the DocType, including read access for users who should be allowed in \u2014 the hook must return False instead of raising.",
+      "example_bad": "# hooks.py\ndef has_permission(doc, user, permission_type):\n    if doc.status == 'Locked':\n        frappe.throw(_('Document is locked'))",
+      "example_good": "# hooks.py\ndef has_permission(doc, user, permission_type):\n    if doc.status == 'Locked':\n        return False\n    return None",
+      "fix": "Never throw or raise in a permission hook; return False to deny and None to defer to the standard permission system.",
+      "id": "FR-039",
+      "pattern": "Python check, hooks.py only: a frappe.throw() call or a raise statement inside a def named has_permission or permission_query_conditions.",
+      "severity": "blocker",
+      "source": "Impertio-Studio/Frappe_Claude_Skill_Package \u2014 skills/source/errors/frappe-errors-permissions/SKILL.md",
+      "title": "frappe.throw() or raise inside a permission hook",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "A has_permission hook can only deny access \u2014 returning True grants nothing, so a hook that relies on it leaves the decision entirely to the standard permission checks and the author's intent is lost.",
+      "example_bad": "# hooks.py\ndef has_permission(doc, ptype, user):\n    if user == doc.owner:\n        return True",
+      "example_good": "# hooks.py\ndef has_permission(doc, ptype, user):\n    if user == doc.owner:\n        return None\n    if not meets_criteria(doc, user):\n        return False\n    return None",
+      "fix": "Return None to let the standard permission system decide, and False to deny; never return True.",
+      "id": "FR-040",
+      "pattern": "Python check, hooks.py only: a return True statement inside a def named has_permission.",
+      "severity": "major",
+      "source": "Impertio-Studio/Frappe_Claude_Skill_Package \u2014 skills/source/errors/frappe-errors-permissions/references/anti-patterns.md",
+      "title": "return True inside a has_permission hook",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "cur_frm is undefined in list view, report and other non-form contexts, so code using it breaks outside the form.",
+      "example_bad": "frappe.ui.form.on('Sales Order', {\n    refresh(frm) {\n        cur_frm.set_value('territory', 'Default');\n    }\n});",
+      "example_good": "frappe.ui.form.on('Sales Order', {\n    refresh(frm) {\n        frm.set_value('territory', 'Default');\n    }\n});",
+      "fix": "Use the frm parameter passed to every form event handler instead of cur_frm.",
+      "id": "FR-041",
+      "pattern": "JS regex check: cur_frm used in a .js file.",
+      "severity": "minor",
+      "source": "Impertio-Studio/Frappe_Claude_Skill_Package \u2014 skills/source/errors/frappe-errors-clientscripts/SKILL.md",
+      "title": "cur_frm used in client script",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "eval() and exec() run arbitrary code from a string; they are blocked in the Server Script sandbox and are a code-injection risk anywhere else.",
+      "example_bad": "result = eval(user_input)",
+      "example_good": "data = frappe.parse_json(doc.payload)",
+      "fix": "Parse data with frappe.parse_json or json.loads instead of eval/exec; legitimate uses in Frappe apps are near-zero.",
+      "id": "FR-042",
+      "pattern": "Python regex check: an eval( or exec( call in a .py file.",
+      "severity": "major",
+      "source": "Impertio-Studio/Frappe_Claude_Skill_Package \u2014 skills/source/syntax/frappe-syntax-serverscripts/references/anti-patterns.md",
+      "title": "eval() or exec() in Python code",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "performance",
+      "description": "frappe.enqueue() without an explicit queue= relies on the framework default, so a long job can land on the short queue and time out, or a quick job can sit behind heavy work.",
+      "example_bad": "frappe.enqueue('my_app.tasks.send_report')",
+      "example_good": "frappe.enqueue(\n    'my_app.tasks.send_report',\n    queue='long',\n    timeout=1800\n)",
+      "fix": "Always pass queue= explicitly \u2014 'short', 'default' or 'long' \u2014 to frappe.enqueue().",
+      "id": "FR-043",
+      "pattern": "Python call-site check: a frappe.enqueue(...) call whose arguments contain no queue= keyword argument; multi-line calls are joined before checking.",
+      "severity": "minor",
+      "source": "Impertio-Studio/Frappe_Claude_Skill_Package \u2014 skills/source/impl/frappe-impl-scheduler/SKILL.md",
+      "title": "frappe.enqueue() without queue=",
       "versions": [
         "v14",
         "v15",

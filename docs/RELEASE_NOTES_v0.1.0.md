@@ -19,11 +19,27 @@ Live URL: **https://irfanzahoor.github.io/frappe-sensei/**
 (goes live once GitHub Pages is enabled: Settings → Pages → Deploy from
 a branch → `main` / root).
 
-## 35 checks, 5 categories
+## 43 checks, 5 categories
 
-Placement (7), Framework APIs (10), Server vs Client (4), Security (7),
-Performance (7) — derived from `frappe_core_skills` v2.3.0 (22 skills).
-Full list: [`docs/RULES.md`](RULES.md).
+Placement (7), Framework APIs (14), Server vs Client (4), Security (10),
+Performance (8) — FR-001 to FR-035 derived from `frappe_core_skills`
+v2.3.0 (22 skills); FR-036 to FR-043 added after the v0.1.0 tag from the
+Impertio-Studio/Frappe_Claude_Skill_Package review (61 skills, rule ideas
+only, written in our own wording). Full list: [`docs/RULES.md`](RULES.md).
+
+### Added after v0.1.0 — 8 rules from the Impertio review (2026-11-27)
+
+- **FR-036 (blocker):** `.save()` inside `validate` / `before_save` /
+  `on_update` — infinite recursion.
+- **FR-037 (major):** assigning `self.<field>` in `on_update` is lost.
+- **FR-038 (major):** overridden `validate()` without `super().validate()`.
+- **FR-039 (blocker):** `frappe.throw()` / `raise` inside a permission hook.
+- **FR-040 (major):** `return True` inside a `has_permission` hook.
+- **FR-041 (minor):** `cur_frm` in a client script.
+- **FR-042 (major):** `eval()` / `exec()` in Python code.
+- **FR-043 (minor):** `frappe.enqueue()` without `queue=`.
+- None of the 8 fires on ERPNext `sales_order.py` (still 8 findings) or
+  on the 6 FMC files (still 4, the known FR-023 cross-file delegates).
 
 ## What changed since the first build
 
@@ -74,8 +90,8 @@ almost all false positives:
 
 ## Tests
 
-65 checker tests passing, 0 failing (35 rules bad+good, 3 verdict
-checks, 27 regression tests). Run: `node checker/checker.test.mjs`.
+84 checker tests passing, 0 failing (43 rules bad+good, 3 verdict
+checks, 38 regression tests). Run: `node checker/checker.test.mjs`.
 
 ## Honest remaining gaps
 

@@ -10,7 +10,7 @@ Paste code, upload a `.py` / `.js` file, or give a public GitHub link — and ge
 
 ## What it does
 
-- **35 checks in 5 categories** — Placement, Framework APIs, Server vs Client, Security, Performance — taken from `frappe_core_skills` v2.3.0.
+- **43 checks in 5 categories** — Placement, Framework APIs, Server vs Client, Security, Performance — taken from `frappe_core_skills` v2.3.0 (FR-001 to FR-035) plus 8 more from the Impertio-Studio/Frappe_Claude_Skill_Package review (FR-036 to FR-043).
 - **Three ways in:** paste code (with bad/good examples), upload files, or a public GitHub repo URL (up to 300 files).
 - **Report:** verdict (approve / approve with fixes / needs rework), severity counts, severity and category filters, Copy report and Download report (`.md`).
 - **Private by design:** it runs entirely in your browser. No login, no storage, your code is never executed and never sent anywhere except the public GitHub files you ask it to fetch.
@@ -29,7 +29,7 @@ Paste code, upload a `.py` / `.js` file, or give a public GitHub link — and ge
 
 ## Status
 
-v0.1.0 in preparation — see [`docs/RELEASE_NOTES_v0.1.0.md`](docs/RELEASE_NOTES_v0.1.0.md). 65 checker tests passing, 0 failing.
+v0.1.0 in preparation — see [`docs/RELEASE_NOTES_v0.1.0.md`](docs/RELEASE_NOTES_v0.1.0.md). 84 checker tests passing, 0 failing.
 
 ## Known limitations
 
@@ -39,9 +39,8 @@ v0.1.0 in preparation — see [`docs/RELEASE_NOTES_v0.1.0.md`](docs/RELEASE_NOTE
 
 ## Rules source
 
-Rules live in [irfanzahoor/frappe_core_skills](https://github.com/irfanzahoor/frappe_core_skills) (v2.3.0, 22 skills). This tool does not run your code — it only reads it, in your browser, and nothing is stored.
+Rules live in [irfanzahoor/frappe_core_skills](https://github.com/irfanzahoor/frappe_core_skills) (v2.3.0, 22 skills) for FR-001 to FR-035, and FR-036 to FR-043 come from the [Impertio-Studio/Frappe_Claude_Skill_Package](https://github.com/Impertio-Studio/Frappe_Claude_Skill_Package) review (61 skills) — rule ideas only, written in our own wording, because that package's licence is inconsistent (README/package.json say MIT, LICENSE.md is LGPL v3). This tool does not run your code — it only reads it, in your browser, and nothing is stored.
 
 ## License
 
 MIT
-

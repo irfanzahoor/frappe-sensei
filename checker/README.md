@@ -1,7 +1,7 @@
 # Frappe Sensei — Checker Engine
 
-The checker implements all 35 rules in `../rules/rules.json` (FR-001 to
-FR-035) as a pure, dependency-free ES module. It reads code only — it never
+The checker implements all 43 rules in `../rules/rules.json` (FR-001 to
+FR-043) as a pure, dependency-free ES module. It reads code only — it never
 runs it, sends it anywhere, or stores it.
 
 ## Files
@@ -154,6 +154,32 @@ any failure.
 - **FR-029 (`frappe.db.commit()`):** flags any `frappe.db.commit()`
   inside a Python function body. A commit at module top level, or in
   a file under `patches/`, is not flagged.
+- **FR-036 (`.save()` in validate / before_save / on_update):** fires
+  on a `.save()` call on `self` or `doc` inside one of those three
+  controller methods. A flags-based recursion guard (`self.flags...`
+  in the method body) exempts it — that is the guard the Impertio
+  anti-patterns file itself recommends.
+- **FR-037 (assignment in `on_update`):** fires on `self.<field> =`
+  (and `+=` etc.) inside `on_update`. Assignments to `self.flags.*`
+  and `self.db_set(...)` calls are exempt. A comparison
+  (`self.x == 1`) does not fire.
+- **FR-038 (validate without `super().validate()`):** scoped to
+  DocType controller classes (inheriting from `Document` directly or
+  through a `*Controller` base). A `validate` method in a plain class
+  does not fire.
+- **FR-039 / FR-040 (permission hooks):** checked only in `hooks.py`
+  itself, inside a `def` named `has_permission` or
+  `permission_query_conditions`. A hook function defined in a separate
+  permissions module is not seen — that is a known gap.
+- **FR-041 (`cur_frm`):** string literals are stripped before
+  checking, and `//` comment lines are skipped, so a message or a
+  comment mentioning `cur_frm` does not fire.
+- **FR-042 (`eval` / `exec`):** string literals are stripped before
+  checking, so a message mentioning `eval()` does not fire.
+- **FR-043 (`enqueue` without `queue=`):** multi-line calls are
+  joined (up to 10 continuation lines) before checking for `queue=`.
+  A positional queue argument does not count — the rule wants the
+  keyword written out.
 
 ## Privacy
 
