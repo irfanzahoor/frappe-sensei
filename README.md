@@ -11,7 +11,7 @@ Paste code, upload a `.py` / `.js` file, or give a public GitHub link — and ge
 ## What it does
 
 - **35 checks in 5 categories** — Placement, Framework APIs, Server vs Client, Security, Performance — taken from `frappe_core_skills` v2.3.0.
-- **Three ways in:** paste code (with bad/good examples), upload files, or a public GitHub repo URL (up to 50 files).
+- **Three ways in:** paste code (with bad/good examples), upload files, or a public GitHub repo URL (up to 300 files).
 - **Report:** verdict (approve / approve with fixes / needs rework), severity counts, severity and category filters, Copy report and Download report (`.md`).
 - **Private by design:** it runs entirely in your browser. No login, no storage, your code is never executed and never sent anywhere except the public GitHub files you ask it to fetch.
 

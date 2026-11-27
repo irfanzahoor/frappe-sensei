@@ -44,6 +44,10 @@ This is the same failure as Day 6-7, not a code bug.
 - What *did* work: `raw.githubusercontent.com` is NOT rate-limited the same way.
   A real file fetched fine (ERPNext `sales_order.py`, 38,987 bytes, HTTP 200) and
   the checker ran on it in 23 ms — see item 4.
+- Cap raised after v0.1.0: the GitHub tab now checks up to **300 files** per run
+  (was 50), fetched 10 at a time with live progress. A repo with more files
+  shows a warning and the subfolder-URL workaround (paste a tree URL like
+  `github.com/owner/repo/tree/branch/food_manufacturing/api`, or upload the rest).
 
 ## 4. Real-browser click-through — UNABLE TO TEST (no browser on this machine)
 

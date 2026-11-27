@@ -49,8 +49,9 @@
       <p class="muted">Public repos only. The file list comes from the public GitHub API (60 requests/hour without a login), and file contents are fetched as raw files. Private repos cannot be checked this way.</p>
       <div class="row">
         <button id="github-fetch" type="button" class="btn secondary">Fetch file list</button>
-        <button id="github-check-all" type="button" class="btn secondary" disabled>Check all (max 50)</button>
+        <button id="github-check-all" type="button" class="btn secondary" disabled>Check all (max 300)</button>
       </div>
+      <p id="github-summary" class="muted" hidden></p>
       <ul id="github-list" class="file-list"></ul>
       <p id="github-empty" class="muted">No repo loaded yet.</p>
     </div>
@@ -119,6 +120,7 @@
       <li><strong>FR-030 / FR-031</strong> do not fire in demo, seed or test files (<code>demo/</code>, <code>tests/</code>, <code>test_</code>, or a filename containing <code>seed</code>), where loops insert demo data by design. Other rules still apply there.</li>
       <li><strong># noqa</strong>: a <code># noqa</code> comment on the flagged line suppresses the finding, for every rule.</li>
       <li><strong>FR-030 / FR-031</strong> (loop detection): loops are tracked by Python indentation, not a full parser. Unusual formatting can be missed.</li>
+      <li><strong>GitHub URL tab</strong>: up to 300 files per run, fetched 10 at a time with live progress. If a repo has more than 300 matching files, only the first 300 are listed — check a subfolder URL (e.g. <code>github.com/owner/repo/tree/branch/food_manufacturing/api</code>) or upload the rest.</li>
       <li>ZIP upload is not in this version — upload several files instead. AI fix suggestions, private repos and logins are out of scope for the MVP.</li>
     </ul>
   </section>

@@ -30,6 +30,10 @@ let activeTab = 'paste';
 const uploadFiles = new Map(); // path -> content
 let githubFiles = []; // { path, checked }
 let githubMeta = null; // { owner, repo, branch }
+const GITHUB_MAX_FILES = 300; // GitHub tab cap — a whole app in one run
+const GITHUB_FETCH_BATCH = 10; // raw files fetched in parallel per batch
+let githubTotalFound = 0; // .py/.js/.html files in the repo/path, before the cap
+let lastFetchFailed = []; // GitHub-tab files that could not be fetched in the last run
 
 const VERDICT_TEXT = {
   approve: 'Approve — no findings.',
@@ -144,11 +148,13 @@ $('github-fetch').addEventListener('click', async () => {
       .filter((e) => e.type === 'blob' && wanted.test(e.path))
       .map((e) => e.path);
     if (parsed.subpath) paths = paths.filter((p) => p.startsWith(parsed.subpath));
-    githubFiles = paths.slice(0, 50).map((path) => ({ path, checked: true }));
+    githubTotalFound = paths.length;
+    githubFiles = paths.slice(0, GITHUB_MAX_FILES).map((path) => ({ path, checked: true }));
     githubMeta = { owner: parsed.owner, repo: parsed.repo, branch };
     $('github-check-all').disabled = githubFiles.length === 0;
     $('github-empty').hidden = githubFiles.length > 0;
     renderGithubList();
+    updateGithubSummary();
     if (githubFiles.length === 0) showError('No .py / .js / .html files found in that repo (or path).');
   } catch (e) {
     showError(e.message);
@@ -165,7 +171,7 @@ function renderGithubList() {
     box.type = 'checkbox';
     box.checked = entry.checked;
     box.setAttribute('aria-label', `Include ${entry.path}`);
-    box.addEventListener('change', () => { entry.checked = box.checked; });
+    box.addEventListener('change', () => { entry.checked = box.checked; updateGithubSummary(); });
     const span = document.createElement('span');
     span.textContent = entry.path;
     li.append(box, span);
@@ -175,7 +181,19 @@ function renderGithubList() {
 $('github-check-all').addEventListener('click', () => {
   githubFiles.forEach((entry) => { entry.checked = true; });
   renderGithubList();
+  updateGithubSummary();
 });
+function updateGithubSummary() {
+  const el = $('github-summary');
+  if (!githubMeta) { el.hidden = true; el.textContent = ''; return; }
+  const checked = githubFiles.filter((f) => f.checked).length;
+  el.hidden = false;
+  let text = `${githubTotalFound} file${githubTotalFound === 1 ? '' : 's'} found, ${checked} will be checked.`;
+  if (githubTotalFound > GITHUB_MAX_FILES) {
+    text += ` Repo has ${githubTotalFound} files, only the first ${GITHUB_MAX_FILES} will be checked — check a subfolder (paste a tree URL like github.com/${githubMeta.owner}/${githubMeta.repo}/tree/${githubMeta.branch}/food_manufacturing/api) or upload the rest.`;
+  }
+  el.textContent = text;
+}
 
 async function gatherFiles() {
   if (activeTab === 'paste') {
@@ -191,13 +209,32 @@ async function gatherFiles() {
   // github
   const selected = githubFiles.filter((f) => f.checked);
   if (!githubMeta || selected.length === 0) throw new Error('Fetch a repo file list and tick at least one file first.');
+  // Fetch in parallel batches of 10 so a whole app (up to 300 files) does
+  // not take 300 sequential round trips. One bad file must not kill the run.
+  lastFetchFailed = [];
   const files = [];
-  for (const entry of selected) {
-    const url = `https://raw.githubusercontent.com/${githubMeta.owner}/${githubMeta.repo}/${githubMeta.branch}/${entry.path}`;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Could not fetch ${entry.path} (HTTP ${response.status}).`);
-    files.push({ path: entry.path, content: await response.text() });
+  let fetched = 0;
+  for (let i = 0; i < selected.length; i += GITHUB_FETCH_BATCH) {
+    const batch = selected.slice(i, i + GITHUB_FETCH_BATCH);
+    const results = await Promise.all(batch.map(async (entry) => {
+      const url = `https://raw.githubusercontent.com/${githubMeta.owner}/${githubMeta.repo}/${githubMeta.branch}/${entry.path}`;
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return { path: entry.path, content: await response.text() };
+      } catch (e) {
+        return { path: entry.path, error: e };
+      }
+    }));
+    for (const r of results) {
+      if (r.error) lastFetchFailed.push(r.path);
+      else files.push({ path: r.path, content: r.content });
+    }
+    fetched += batch.length;
+    $('busy').textContent = `Fetching file ${Math.min(fetched, selected.length)} of ${selected.length}…`;
   }
+  $('busy').textContent = 'Checking…';
+  if (files.length === 0) throw new Error(`Could not fetch any of the selected files: ${lastFetchFailed.join(', ')}`);
   return files;
 }
 
@@ -214,10 +251,14 @@ $('run-btn').addEventListener('click', async () => {
     lastResult = checkFiles(files, rules);
     const elapsed = Math.round(performance.now() - started);
     renderResults(lastResult, files, elapsed);
+    if (lastFetchFailed.length > 0) {
+      showError(`Could not fetch ${lastFetchFailed.length} file${lastFetchFailed.length === 1 ? '' : 's'} — skipped: ${lastFetchFailed.join(', ')}`);
+    }
   } catch (e) {
     showError(e.message);
   } finally {
     $('busy').hidden = true;
+    $('busy').textContent = 'Checking…';
     $('run-btn').disabled = false;
   }
 });
@@ -227,6 +268,10 @@ $('clear-btn').addEventListener('click', () => {
   renderUploadList();
   githubFiles = [];
   githubMeta = null;
+  githubTotalFound = 0;
+  lastFetchFailed = [];
+  $('github-summary').hidden = true;
+  $('github-summary').textContent = '';
   $('github-url').value = '';
   $('github-list').innerHTML = '';
   $('github-empty').hidden = false;
