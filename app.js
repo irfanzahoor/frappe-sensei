@@ -31,13 +31,12 @@ let lastResult = null;
 let lastFiles = [];
 let activeTab = 'paste';
 const uploadFiles = new Map(); // relative path -> content (folder uploads keep their relative path, so two files with the same name in different folders no longer overwrite each other)
-const UPLOAD_MAX_FILES = 500; // folder upload cap — a whole app in one run, no GitHub API, no rate limit
 const UPLOAD_WANTED = /\.(py|js|html|jinja|j2)$/i;
 let githubFiles = []; // { path, checked }
 let githubMeta = null; // { owner, repo, branch }
-const GITHUB_MAX_FILES = 300; // GitHub tab cap — a whole app in one run
 const GITHUB_FETCH_BATCH = 10; // raw files fetched in parallel per batch
-let githubTotalFound = 0; // .py/.js/.html files in the repo/path, before the cap
+let githubTotalFound = 0; // .py/.js/.html files in the repo/path
+let githubTruncated = false; // GitHub's recursive tree can be truncated for very large repos
 let lastFetchFailed = []; // GitHub-tab files that could not be fetched in the last run
 
 const VERDICT_TEXT = {
@@ -114,12 +113,10 @@ $('folder-input').addEventListener('change', async (event) => {
   const picked = [...event.target.files].filter((f) => UPLOAD_WANTED.test(f.name));
   if (picked.length === 0) {
     showError('That folder has no .py / .js / .html files in it.');
-  } else if (picked.length > UPLOAD_MAX_FILES) {
-    showError(`That folder has ${picked.length} matching files — only the first ${UPLOAD_MAX_FILES} will be checked. Check a subfolder instead, or use the GitHub URL tab with a token.`);
   } else {
     showError('');
   }
-  for (const file of picked.slice(0, UPLOAD_MAX_FILES)) {
+  for (const file of picked) {
     uploadFiles.set(file.webkitRelativePath || file.name, await file.text());
   }
   event.target.value = '';
@@ -129,9 +126,8 @@ function renderUploadList() {
   const list = $('upload-list');
   list.innerHTML = '';
   $('upload-empty').hidden = uploadFiles.size > 0;
-  const summary = $('upload-summary');
-  summary.hidden = uploadFiles.size === 0;
-  summary.textContent = `${uploadFiles.size} file${uploadFiles.size === 1 ? '' : 's'} added.`;
+  $('upload-details').hidden = uploadFiles.size === 0;
+  $('upload-summary').textContent = `${uploadFiles.size} file${uploadFiles.size === 1 ? '' : 's'} added — click to view the list.`;
   for (const name of uploadFiles.keys()) {
     const li = document.createElement('li');
     li.textContent = name;
@@ -218,7 +214,8 @@ $('github-fetch').addEventListener('click', async () => {
       .map((e) => e.path);
     if (parsed.subpath) paths = paths.filter((p) => p.startsWith(parsed.subpath));
     githubTotalFound = paths.length;
-    githubFiles = paths.slice(0, GITHUB_MAX_FILES).map((path) => ({ path, checked: true }));
+    githubTruncated = tree.truncated === true;
+    githubFiles = paths.map((path) => ({ path, checked: true }));
     githubMeta = { owner: parsed.owner, repo: parsed.repo, branch };
     $('github-check-all').disabled = githubFiles.length === 0;
     $('github-empty').hidden = githubFiles.length > 0;
@@ -254,12 +251,12 @@ $('github-check-all').addEventListener('click', () => {
 });
 function updateGithubSummary() {
   const el = $('github-summary');
-  if (!githubMeta) { el.hidden = true; el.textContent = ''; return; }
+  if (!githubMeta || githubFiles.length === 0) { $('github-details').hidden = true; el.textContent = ''; return; }
   const checked = githubFiles.filter((f) => f.checked).length;
-  el.hidden = false;
-  let text = `${githubTotalFound} file${githubTotalFound === 1 ? '' : 's'} found, ${checked} will be checked.`;
-  if (githubTotalFound > GITHUB_MAX_FILES) {
-    text += ` Repo has ${githubTotalFound} files, only the first ${GITHUB_MAX_FILES} will be checked — check a subfolder (paste a tree URL like github.com/${githubMeta.owner}/${githubMeta.repo}/tree/${githubMeta.branch}/food_manufacturing/api) or upload the rest.`;
+  $('github-details').hidden = false;
+  let text = `${githubTotalFound} file${githubTotalFound === 1 ? '' : 's'} found, ${checked} will be checked — click to view the list.`;
+  if (githubTruncated) {
+    text += ` GitHub truncated this file list (very large repo) — check a subfolder URL (paste a tree URL like github.com/${githubMeta.owner}/${githubMeta.repo}/tree/${githubMeta.branch}/food_manufacturing/api) to see the rest.`;
   }
   el.textContent = text;
 }
@@ -278,8 +275,8 @@ async function gatherFiles() {
   // github
   const selected = githubFiles.filter((f) => f.checked);
   if (!githubMeta || selected.length === 0) throw new Error('Fetch a repo file list and tick at least one file first.');
-  // Fetch in parallel batches of 10 so a whole app (up to 300 files) does
-  // not take 300 sequential round trips. One bad file must not kill the run.
+  // Fetch in parallel batches of 10 so a whole app (no file limit) does
+  // not take one sequential round trip per file. One bad file must not kill the run.
   lastFetchFailed = [];
   const files = [];
   let fetched = 0;
@@ -339,8 +336,8 @@ $('clear-btn').addEventListener('click', () => {
   githubMeta = null;
   githubTotalFound = 0;
   lastFetchFailed = [];
-  $('github-summary').hidden = true;
   $('github-summary').textContent = '';
+  $('github-details').hidden = true;
   $('github-url').value = '';
   $('github-list').innerHTML = '';
   $('github-empty').hidden = false;

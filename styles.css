@@ -105,6 +105,24 @@ textarea { font-family: var(--font-mono); font-size: 0.9rem; }
   word-break: break-all;
 }
 .file-list button { margin-left: auto; flex-shrink: 0; }
+/* File lists are collapsible dropdowns: the count is always visible, the
+   long list only opens when clicked, so it never floods the page. */
+.file-details {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-top: 12px;
+  background: #fbfcfe;
+}
+.file-details summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-weight: 600;
+  color: var(--navy);
+  list-style-position: inside;
+}
+.file-details summary::marker { color: var(--navy); }
+.file-details .file-list { margin: 0; padding: 0 12px 8px; }
+.file-details .file-list li:last-child { border-bottom: none; }
 .verdict {
   border-radius: 8px;
   padding: 14px 16px;

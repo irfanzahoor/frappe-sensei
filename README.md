@@ -11,7 +11,7 @@ Paste code, upload a `.py` / `.js` file, or give a public GitHub link — and ge
 ## What it does
 
 - **79 checks in 5 categories** — Placement, Framework APIs, Server vs Client, Security, Performance — taken from `frappe_core_skills` v2.3.0 (FR-001 to FR-035) plus 8 more from the Impertio-Studio/Frappe_Claude_Skill_Package review (FR-036 to FR-043) and 16 more from the official frappe/skills review (FR-044 to FR-059) and 15 important second-pass rules from the same review (FR-060 to FR-076, skipping FR-068, FR-073 and FR-077) and 5 useful rules from the lubusIN/frappe-skills and Dkm0315/frappe-agent reviews (FR-078 to FR-082).
-- **Three ways in:** paste code (with bad/good examples), upload files, or a public GitHub repo URL (up to 300 files).
+- **Three ways in:** paste code (with bad/good examples), upload files, or a public GitHub repo URL (no file limit).
 - **Report:** verdict (approve / approve with fixes / needs rework), severity counts, severity and category filters, Copy report and Download report (`.md`).
 - **Private by design:** it runs entirely in your browser. No login, no storage, your code is never executed and never sent anywhere except the public GitHub files you ask it to fetch.
 

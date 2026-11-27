@@ -42,11 +42,13 @@
     <div class="panel" id="panel-upload" role="tabpanel">
       <label for="file-input">Choose .py / .js / .html files (more than one is fine)</label>
       <input id="file-input" type="file" multiple accept=".py,.js,.html,.jinja,.j2,.json">
-      <label for="folder-input">Or upload a whole app folder — no GitHub limit, up to 500 files</label>
+      <label for="folder-input">Or upload a whole app folder — no GitHub limit, no file limit</label>
       <input id="folder-input" type="file" webkitdirectory accept=".py,.js,.html,.jinja,.j2">
       <p class="muted">Pick your app folder (e.g. your local <code>fmc</code> folder). Every <code>.py</code> / <code>.js</code> / <code>.html</code> file inside it is checked in one run, with its folder path kept — and nothing is uploaded to any server, it all stays in your browser.</p>
-      <p id="upload-summary" class="muted" hidden></p>
-      <ul id="upload-list" class="file-list"></ul>
+      <details id="upload-details" class="file-details" hidden>
+        <summary><span id="upload-summary">Files</span></summary>
+        <ul id="upload-list" class="file-list"></ul>
+      </details>
       <p id="upload-empty" class="muted">No files chosen yet.</p>
     </div>
 
@@ -64,10 +66,12 @@
       </div>
       <div class="row">
         <button id="github-fetch" type="button" class="btn secondary">Fetch file list</button>
-        <button id="github-check-all" type="button" class="btn secondary" disabled>Check all (max 300)</button>
+        <button id="github-check-all" type="button" class="btn secondary" disabled>Check all</button>
       </div>
-      <p id="github-summary" class="muted" hidden></p>
-      <ul id="github-list" class="file-list"></ul>
+      <details id="github-details" class="file-details" hidden>
+        <summary><span id="github-summary">Files</span></summary>
+        <ul id="github-list" class="file-list"></ul>
+      </details>
       <p id="github-empty" class="muted">No repo loaded yet.</p>
     </div>
 
@@ -135,8 +139,8 @@
       <li><strong>FR-030 / FR-031</strong> do not fire in demo, seed or test files (<code>demo/</code>, <code>tests/</code>, <code>test_</code>, or a filename containing <code>seed</code>), where loops insert demo data by design. Other rules still apply there.</li>
       <li><strong># noqa</strong>: a <code># noqa</code> comment on the flagged line suppresses the finding, for every rule.</li>
       <li><strong>FR-030 / FR-031</strong> (loop detection): loops are tracked by Python indentation, not a full parser. Unusual formatting can be missed.</li>
-      <li><strong>GitHub URL tab</strong>: up to 300 files per run, fetched 10 at a time with live progress. The file list uses the public GitHub API, which allows only 60 requests/hour without a login — that quota is per IP address and shared by everyone on it, so it can run out even if you only fetched once. Paste a GitHub token above to raise it to 5,000/hour, or use the Upload folder tab instead — it has no limit. If a repo has more than 300 matching files, only the first 300 are listed — check a subfolder URL (e.g. <code>github.com/owner/repo/tree/branch/food_manufacturing/api</code>) or upload the rest.</li>
-      <li><strong>Upload folder tab</strong>: pick a whole app folder from your computer — every <code>.py</code> / <code>.js</code> / <code>.html</code> file inside it is checked in one run, up to 500 files, with no GitHub API calls and no rate limit. Files keep their relative paths.</li>
+      <li><strong>GitHub URL tab</strong>: no file limit — a whole app in one run, fetched 10 at a time with live progress. The file list uses the public GitHub API, which allows only 60 requests/hour without a login — that quota is per IP address and shared by everyone on it, so it can run out even if you only fetched once. Paste a GitHub token above to raise it to 5,000/hour, or use the Upload folder tab instead — it has no limit. A very large repo just takes longer to fetch; check a subfolder URL (e.g. <code>github.com/owner/repo/tree/branch/food_manufacturing/api</code>) if you only want part of it. GitHub itself can truncate the file list of an extremely large repo — the page will tell you if that happens.</li>
+      <li><strong>Upload folder tab</strong>: pick a whole app folder from your computer — every <code>.py</code> / <code>.js</code> / <code>.html</code> file inside it is checked in one run, with no file limit, no GitHub API calls and no rate limit. Files keep their relative paths.</li>
       <li>ZIP upload is not in this version — upload a folder instead. AI fix suggestions, private repos and logins are out of scope for the MVP.</li>
     </ul>
   </section>
