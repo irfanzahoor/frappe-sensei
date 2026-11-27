@@ -44,3 +44,4 @@ Rules live in [irfanzahoor/frappe_core_skills](https://github.com/irfanzahoor/fr
 ## License
 
 MIT
+
