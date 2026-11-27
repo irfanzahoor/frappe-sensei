@@ -2,8 +2,11 @@
 // Static page, no framework, no build step. The only network calls are:
 //   1. fetch('rules/rules.json') — the 35 rules, same origin.
 //   2. api.github.com + raw.githubusercontent.com — only when the user
-//      gives a GitHub URL. No other network, no login, no storage, and
-//      user code is never executed.
+//      gives a GitHub URL. No other network, no login, and user code is
+//      never executed. An optional GitHub token, if the user pastes one,
+//      is kept in this browser's localStorage only and sent to GitHub as
+//      an Authorization header — never to any server of ours, because
+//      this tool has no server.
 import { checkFiles } from './checker/checker.js';
 
 const $ = (id) => document.getElementById(id);
@@ -27,7 +30,9 @@ let rulesData = null;
 let lastResult = null;
 let lastFiles = [];
 let activeTab = 'paste';
-const uploadFiles = new Map(); // path -> content
+const uploadFiles = new Map(); // relative path -> content (folder uploads keep their relative path, so two files with the same name in different folders no longer overwrite each other)
+const UPLOAD_MAX_FILES = 500; // folder upload cap — a whole app in one run, no GitHub API, no rate limit
+const UPLOAD_WANTED = /\.(py|js|html|jinja|j2)$/i;
 let githubFiles = []; // { path, checked }
 let githubMeta = null; // { owner, repo, branch }
 const GITHUB_MAX_FILES = 300; // GitHub tab cap — a whole app in one run
@@ -95,9 +100,27 @@ $('load-good').addEventListener('click', () => {
 });
 
 // --- Upload tab -----------------------------------------------------------
+// Single files are keyed by their name; folder uploads are keyed by their
+// relative path (file.webkitRelativePath), so same-named files in different
+// folders no longer overwrite each other.
 $('file-input').addEventListener('change', async (event) => {
   for (const file of event.target.files) {
     uploadFiles.set(file.name, await file.text());
+  }
+  event.target.value = '';
+  renderUploadList();
+});
+$('folder-input').addEventListener('change', async (event) => {
+  const picked = [...event.target.files].filter((f) => UPLOAD_WANTED.test(f.name));
+  if (picked.length === 0) {
+    showError('That folder has no .py / .js / .html files in it.');
+  } else if (picked.length > UPLOAD_MAX_FILES) {
+    showError(`That folder has ${picked.length} matching files — only the first ${UPLOAD_MAX_FILES} will be checked. Check a subfolder instead, or use the GitHub URL tab with a token.`);
+  } else {
+    showError('');
+  }
+  for (const file of picked.slice(0, UPLOAD_MAX_FILES)) {
+    uploadFiles.set(file.webkitRelativePath || file.name, await file.text());
   }
   event.target.value = '';
   renderUploadList();
@@ -106,6 +129,9 @@ function renderUploadList() {
   const list = $('upload-list');
   list.innerHTML = '';
   $('upload-empty').hidden = uploadFiles.size > 0;
+  const summary = $('upload-summary');
+  summary.hidden = uploadFiles.size === 0;
+  summary.textContent = `${uploadFiles.size} file${uploadFiles.size === 1 ? '' : 's'} added.`;
   for (const name of uploadFiles.keys()) {
     const li = document.createElement('li');
     li.textContent = name;
@@ -119,6 +145,42 @@ function renderUploadList() {
   }
 }
 
+// --- GitHub token (optional, stored only in this browser) ----------------
+// Without a token GitHub allows 60 unauthenticated api.github.com requests
+// per hour per IP, shared by everyone on that IP — that is the rate limit
+// the user hit. With a token the limit is 5,000/hour. The token lives in
+// localStorage only; it is never written to the repo and never sent
+// anywhere except to api.github.com as an Authorization header.
+const GITHUB_TOKEN_KEY = 'frappe-sensei-github-token';
+const RATE_LIMIT_MESSAGE = 'GitHub rate limit reached (60 requests/hour without a login). Wait a while, paste a token above, or use the Upload folder tab instead — it has no limit.';
+function getGithubToken() {
+  try { return (localStorage.getItem(GITHUB_TOKEN_KEY) || '').trim(); } catch (e) { return ''; }
+}
+function setGithubTokenStatus() {
+  const el = $('github-token-status');
+  el.textContent = getGithubToken() ? 'Token saved in this browser.' : 'No token saved — limit is 60 requests/hour.';
+}
+function initGithubToken() {
+  const input = $('github-token');
+  input.value = getGithubToken();
+  setGithubTokenStatus();
+}
+$('save-github-token').addEventListener('click', () => {
+  const value = $('github-token').value.trim();
+  try {
+    if (value) localStorage.setItem(GITHUB_TOKEN_KEY, value);
+    else localStorage.removeItem(GITHUB_TOKEN_KEY);
+  } catch (e) { /* storage unavailable (private mode) — token still works for this page load */ }
+  setGithubTokenStatus();
+  showError('');
+});
+$('clear-github-token').addEventListener('click', () => {
+  try { localStorage.removeItem(GITHUB_TOKEN_KEY); } catch (e) { /* ignore */ }
+  $('github-token').value = '';
+  setGithubTokenStatus();
+});
+initGithubToken();
+
 // --- GitHub tab -----------------------------------------------------------
 function parseGitHubUrl(raw) {
   const m = /^https?:\/\/github\.com\/([^/\s]+)\/([^/\s#?]+?)(?:\.git)?(?:\/(?:tree|blob)\/([^/\s]+)(?:\/(.*))?)?\/?$/.exec(raw.trim());
@@ -126,11 +188,18 @@ function parseGitHubUrl(raw) {
   return { owner: m[1], repo: m[2], branch: m[3] || null, subpath: m[4] || '' };
 }
 async function githubJson(url) {
-  const response = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } });
+  const headers = { Accept: 'application/vnd.github+json' };
+  const token = getGithubToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(url, { headers });
   if (response.status === 403) {
-    throw new Error('GitHub rate limit reached (60 requests/hour without a login). Wait a while and try again.');
+    let body = '';
+    try { body = await response.clone().text(); } catch (e) { /* ignore */ }
+    if (/rate limit/i.test(body)) throw new Error(RATE_LIMIT_MESSAGE);
+    throw new Error('GitHub returned 403 — the repo may be private, or the token may be wrong or lack access.');
   }
-  if (response.status === 404) throw new Error('Repo not found on GitHub — check the URL, and note private repos cannot be checked this way.');
+  if (response.status === 404) throw new Error('Repo not found on GitHub — check the URL, and note private repos cannot be checked this way without a token that can read them.');
+  if (response.status === 401) throw new Error('GitHub rejected the token — check it and save it again, or clear it to go back to no-login mode.');
   if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}.`);
   return response.json();
 }

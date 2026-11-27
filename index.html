@@ -16,7 +16,7 @@
 </header>
 
 <main class="wrap">
-  <p class="privacy"><strong>Privacy:</strong> your code never leaves this page, except when you give a GitHub URL — then only public files are fetched from GitHub. Nothing is stored, no login, and your code is never executed — it is only read.</p>
+  <p class="privacy"><strong>Privacy:</strong> your code never leaves this page, except when you give a GitHub URL — then only public files are fetched from GitHub. Nothing is stored, no login, and your code is never executed — it is only read. The one exception: if you paste a GitHub token, it is stored in your own browser only.</p>
 
   <section class="card" aria-label="Check your code">
     <div class="tabs" role="tablist" aria-label="Input method">
@@ -39,6 +39,10 @@
     <div class="panel" id="panel-upload" role="tabpanel">
       <label for="file-input">Choose .py / .js / .html files (more than one is fine)</label>
       <input id="file-input" type="file" multiple accept=".py,.js,.html,.jinja,.j2,.json">
+      <label for="folder-input">Or upload a whole app folder — no GitHub limit, up to 500 files</label>
+      <input id="folder-input" type="file" webkitdirectory accept=".py,.js,.html,.jinja,.j2">
+      <p class="muted">Pick your app folder (e.g. your local <code>fmc</code> folder). Every <code>.py</code> / <code>.js</code> / <code>.html</code> file inside it is checked in one run, with its folder path kept — and nothing is uploaded to any server, it all stays in your browser.</p>
+      <p id="upload-summary" class="muted" hidden></p>
       <ul id="upload-list" class="file-list"></ul>
       <p id="upload-empty" class="muted">No files chosen yet.</p>
     </div>
@@ -46,7 +50,15 @@
     <div class="panel" id="panel-github" role="tabpanel">
       <label for="github-url">Public GitHub repo URL</label>
       <input id="github-url" type="url" placeholder="https://github.com/irfanzahoor/frappe_core_skills" spellcheck="false">
-      <p class="muted">Public repos only. The file list comes from the public GitHub API (60 requests/hour without a login), and file contents are fetched as raw files. Private repos cannot be checked this way.</p>
+      <p class="muted">Public repos only. The file list comes from the public GitHub API (60 requests/hour without a login), and file contents are fetched as raw files. Private repos cannot be checked this way without a token that can read them.</p>
+      <label for="github-token">GitHub token (optional)</label>
+      <input id="github-token" type="password" placeholder="ghp_…" spellcheck="false" autocomplete="off">
+      <p class="muted">Paste a GitHub personal access token to raise the limit from 60 to 5,000 requests/hour. The token stays in YOUR browser only (saved in this browser's local storage) — it is never sent to any server, because this tool has no server. A classic token needs no scopes for public repos; a fine-grained token needs read access to the repo.</p>
+      <div class="row">
+        <button id="save-github-token" type="button" class="btn secondary">Save token</button>
+        <button id="clear-github-token" type="button" class="btn secondary">Forget token</button>
+        <span id="github-token-status" class="muted"></span>
+      </div>
       <div class="row">
         <button id="github-fetch" type="button" class="btn secondary">Fetch file list</button>
         <button id="github-check-all" type="button" class="btn secondary" disabled>Check all (max 300)</button>
@@ -120,8 +132,9 @@
       <li><strong>FR-030 / FR-031</strong> do not fire in demo, seed or test files (<code>demo/</code>, <code>tests/</code>, <code>test_</code>, or a filename containing <code>seed</code>), where loops insert demo data by design. Other rules still apply there.</li>
       <li><strong># noqa</strong>: a <code># noqa</code> comment on the flagged line suppresses the finding, for every rule.</li>
       <li><strong>FR-030 / FR-031</strong> (loop detection): loops are tracked by Python indentation, not a full parser. Unusual formatting can be missed.</li>
-      <li><strong>GitHub URL tab</strong>: up to 300 files per run, fetched 10 at a time with live progress. If a repo has more than 300 matching files, only the first 300 are listed — check a subfolder URL (e.g. <code>github.com/owner/repo/tree/branch/food_manufacturing/api</code>) or upload the rest.</li>
-      <li>ZIP upload is not in this version — upload several files instead. AI fix suggestions, private repos and logins are out of scope for the MVP.</li>
+      <li><strong>GitHub URL tab</strong>: up to 300 files per run, fetched 10 at a time with live progress. The file list uses the public GitHub API, which allows only 60 requests/hour without a login — that quota is per IP address and shared by everyone on it, so it can run out even if you only fetched once. Paste a GitHub token above to raise it to 5,000/hour, or use the Upload folder tab instead — it has no limit. If a repo has more than 300 matching files, only the first 300 are listed — check a subfolder URL (e.g. <code>github.com/owner/repo/tree/branch/food_manufacturing/api</code>) or upload the rest.</li>
+      <li><strong>Upload folder tab</strong>: pick a whole app folder from your computer — every <code>.py</code> / <code>.js</code> / <code>.html</code> file inside it is checked in one run, up to 500 files, with no GitHub API calls and no rate limit. Files keep their relative paths.</li>
+      <li>ZIP upload is not in this version — upload a folder instead. AI fix suggestions, private repos and logins are out of scope for the MVP.</li>
     </ul>
   </section>
 </main>

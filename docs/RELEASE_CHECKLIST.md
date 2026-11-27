@@ -35,8 +35,10 @@ This is the same failure as Day 6-7, not a code bug.
 - Safe retry time: after about **09:17 UTC / 14:17 PKT on 2026-11-27** (the latest
   reset seen). Retry with the exact flow `app.js` uses:
   `GET /repos/{owner}/{repo}` then `GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1`.
-- The code path itself is correct on reading: `app.js` handles 403 with the message
-  "GitHub rate limit reached (60 requests/hour without a login). Wait a while and try again."
+- The code path itself is correct on reading: `app.js` handles a 403 whose body
+  says "rate limit" with the message "GitHub rate limit reached (60 requests/hour
+  without a login). Wait a while, paste a token above, or use the Upload folder
+  tab instead — it has no limit."
 - **Better demo repo for the retry:** `irfanzahoor/frappe_core_skills` has **no**
   `.py` / `.js` files at all (markdown-only skills repo), so the GitHub tab would
   return 0 files there even with quota. Use `irfanzahoor/fmc` instead — a real app
@@ -48,6 +50,11 @@ This is the same failure as Day 6-7, not a code bug.
   (was 50), fetched 10 at a time with live progress. A repo with more files
   shows a warning and the subfolder-URL workaround (paste a tree URL like
   `github.com/owner/repo/tree/branch/food_manufacturing/api`, or upload the rest).
+- Rate-limit fix after v0.1.0: an optional GitHub token field (stored in the
+  browser's localStorage only, sent as `Authorization: Bearer`) raises the limit
+  to 5,000/hour — and a new **Upload folder** tab checks a whole local app
+  (up to 500 files, relative paths kept) with no GitHub API calls at all, so it
+  never hits the limit. FMC has 211 files, so it fits in one folder upload.
 
 ## 4. Real-browser click-through — UNABLE TO TEST (no browser on this machine)
 
