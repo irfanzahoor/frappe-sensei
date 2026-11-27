@@ -1,0 +1,299 @@
+// Frappe Sensei — web UI (MVP Day 6-7).
+// Static page, no framework, no build step. The only network calls are:
+//   1. fetch('rules/rules.json') — the 35 rules, same origin.
+//   2. api.github.com + raw.githubusercontent.com — only when the user
+//      gives a GitHub URL. No other network, no login, no storage, and
+//      user code is never executed.
+import { checkFiles } from './checker/checker.js';
+
+const $ = (id) => document.getElementById(id);
+
+const BAD_EXAMPLE = {
+  path: 'my_app/hooks.py',
+  content: `# hooks.py
+def validate_sales_order(doc, method):
+    if doc.total < 0:
+        frappe.throw(_('Total cannot be negative'))`,
+};
+const GOOD_EXAMPLE = {
+  path: 'my_app/doctype/sales_order/sales_order.py',
+  content: `# sales_order/sales_order.py
+def validate(self):
+    if self.total < 0:
+        frappe.throw(_('Total cannot be negative'))`,
+};
+
+let rulesData = null;
+let lastResult = null;
+let lastFiles = [];
+let activeTab = 'paste';
+const uploadFiles = new Map(); // path -> content
+let githubFiles = []; // { path, checked }
+let githubMeta = null; // { owner, repo, branch }
+
+const VERDICT_TEXT = {
+  approve: 'Approve — no findings.',
+  'approve with fixes': 'Approve with fixes — no blockers, but fix the major findings.',
+  'needs rework': 'Needs rework — blocker findings must be fixed first.',
+};
+const VERDICT_CLASS = {
+  approve: 'approve',
+  'approve with fixes': 'fixes',
+  'needs rework': 'rework',
+};
+
+function showError(message) {
+  const el = $('error');
+  el.textContent = message;
+  el.hidden = !message;
+}
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function loadRules() {
+  if (rulesData) return rulesData;
+  let response;
+  try {
+    response = await fetch('rules/rules.json');
+  } catch (e) {
+    throw new Error('rules/rules.json could not be loaded. Open this page through a local server (python3 -m http.server) or GitHub Pages — opening index.html directly with file:// blocks the rules file.');
+  }
+  if (!response.ok) throw new Error(`rules/rules.json could not be loaded (HTTP ${response.status}).`);
+  rulesData = await response.json();
+  if (!Array.isArray(rulesData.rules) || rulesData.rules.length === 0) {
+    throw new Error('rules/rules.json is empty or invalid.');
+  }
+  return rulesData;
+}
+
+// --- Tabs -----------------------------------------------------------------
+document.querySelectorAll('.tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((t) => {
+      t.classList.toggle('active', t === tab);
+      t.setAttribute('aria-selected', String(t === tab));
+    });
+    document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
+    $(`panel-${tab.dataset.tab}`).classList.add('active');
+    activeTab = tab.dataset.tab;
+  });
+});
+
+// --- Paste tab ------------------------------------------------------------
+$('load-bad').addEventListener('click', () => {
+  $('paste-filename').value = BAD_EXAMPLE.path;
+  $('paste-code').value = BAD_EXAMPLE.content;
+});
+$('load-good').addEventListener('click', () => {
+  $('paste-filename').value = GOOD_EXAMPLE.path;
+  $('paste-code').value = GOOD_EXAMPLE.content;
+});
+
+// --- Upload tab -----------------------------------------------------------
+$('file-input').addEventListener('change', async (event) => {
+  for (const file of event.target.files) {
+    uploadFiles.set(file.name, await file.text());
+  }
+  event.target.value = '';
+  renderUploadList();
+});
+function renderUploadList() {
+  const list = $('upload-list');
+  list.innerHTML = '';
+  $('upload-empty').hidden = uploadFiles.size > 0;
+  for (const name of uploadFiles.keys()) {
+    const li = document.createElement('li');
+    li.textContent = name;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn secondary';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', () => { uploadFiles.delete(name); renderUploadList(); });
+    li.appendChild(remove);
+    list.appendChild(li);
+  }
+}
+
+// --- GitHub tab -----------------------------------------------------------
+function parseGitHubUrl(raw) {
+  const m = /^https?:\/\/github\.com\/([^/\s]+)\/([^/\s#?]+?)(?:\.git)?(?:\/(?:tree|blob)\/([^/\s]+)(?:\/(.*))?)?\/?$/.exec(raw.trim());
+  if (!m) return null;
+  return { owner: m[1], repo: m[2], branch: m[3] || null, subpath: m[4] || '' };
+}
+async function githubJson(url) {
+  const response = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } });
+  if (response.status === 403) {
+    throw new Error('GitHub rate limit reached (60 requests/hour without a login). Wait a while and try again.');
+  }
+  if (response.status === 404) throw new Error('Repo not found on GitHub — check the URL, and note private repos cannot be checked this way.');
+  if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}.`);
+  return response.json();
+}
+$('github-fetch').addEventListener('click', async () => {
+  showError('');
+  const parsed = parseGitHubUrl($('github-url').value);
+  if (!parsed) { showError('That does not look like a GitHub repo URL. Use https://github.com/owner/repo'); return; }
+  $('github-fetch').disabled = true;
+  try {
+    const repo = await githubJson(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}`);
+    const branch = parsed.branch || repo.default_branch;
+    const tree = await githubJson(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/git/trees/${branch}?recursive=1`);
+    const wanted = /\.(py|js|html|jinja|j2)$/i;
+    let paths = (tree.tree || [])
+      .filter((e) => e.type === 'blob' && wanted.test(e.path))
+      .map((e) => e.path);
+    if (parsed.subpath) paths = paths.filter((p) => p.startsWith(parsed.subpath));
+    githubFiles = paths.slice(0, 50).map((path) => ({ path, checked: true }));
+    githubMeta = { owner: parsed.owner, repo: parsed.repo, branch };
+    $('github-check-all').disabled = githubFiles.length === 0;
+    $('github-empty').hidden = githubFiles.length > 0;
+    renderGithubList();
+    if (githubFiles.length === 0) showError('No .py / .js / .html files found in that repo (or path).');
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    $('github-fetch').disabled = false;
+  }
+});
+function renderGithubList() {
+  const list = $('github-list');
+  list.innerHTML = '';
+  githubFiles.forEach((entry, i) => {
+    const li = document.createElement('li');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = entry.checked;
+    box.setAttribute('aria-label', `Include ${entry.path}`);
+    box.addEventListener('change', () => { entry.checked = box.checked; });
+    const span = document.createElement('span');
+    span.textContent = entry.path;
+    li.append(box, span);
+    list.appendChild(li);
+  });
+}
+$('github-check-all').addEventListener('click', () => {
+  githubFiles.forEach((entry) => { entry.checked = true; });
+  renderGithubList();
+});
+
+async function gatherFiles() {
+  if (activeTab === 'paste') {
+    const content = $('paste-code').value;
+    const path = $('paste-filename').value.trim() || 'snippet.py';
+    if (!content.trim()) throw new Error('Paste some code first.');
+    return [{ path, content }];
+  }
+  if (activeTab === 'upload') {
+    if (uploadFiles.size === 0) throw new Error('Choose at least one file first.');
+    return [...uploadFiles.entries()].map(([path, content]) => ({ path, content }));
+  }
+  // github
+  const selected = githubFiles.filter((f) => f.checked);
+  if (!githubMeta || selected.length === 0) throw new Error('Fetch a repo file list and tick at least one file first.');
+  const files = [];
+  for (const entry of selected) {
+    const url = `https://raw.githubusercontent.com/${githubMeta.owner}/${githubMeta.repo}/${githubMeta.branch}/${entry.path}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Could not fetch ${entry.path} (HTTP ${response.status}).`);
+    files.push({ path: entry.path, content: await response.text() });
+  }
+  return files;
+}
+
+// --- Run ------------------------------------------------------------------
+$('run-btn').addEventListener('click', async () => {
+  showError('');
+  $('busy').hidden = false;
+  $('run-btn').disabled = true;
+  try {
+    const rules = await loadRules();
+    const files = await gatherFiles();
+    lastFiles = files;
+    const started = performance.now();
+    lastResult = checkFiles(files, rules);
+    const elapsed = Math.round(performance.now() - started);
+    renderResults(lastResult, files, elapsed);
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    $('busy').hidden = true;
+    $('run-btn').disabled = false;
+  }
+});
+$('clear-btn').addEventListener('click', () => {
+  $('paste-code').value = '';
+  uploadFiles.clear();
+  renderUploadList();
+  githubFiles = [];
+  githubMeta = null;
+  $('github-url').value = '';
+  $('github-list').innerHTML = '';
+  $('github-empty').hidden = false;
+  $('github-check-all').disabled = true;
+  lastResult = null;
+  lastFiles = [];
+  $('results').hidden = true;
+  showError('');
+});
+
+function renderResults(result, files, elapsedMs) {
+  const section = $('results');
+  section.hidden = false;
+  const verdict = $('verdict');
+  verdict.className = `verdict ${VERDICT_CLASS[result.verdict] || ''}`;
+  verdict.textContent = `${result.verdict} — ${result.summary.total} finding${result.summary.total === 1 ? '' : 's'} in ${files.length} file${files.length === 1 ? '' : 's'} (${elapsedMs} ms). ${VERDICT_TEXT[result.verdict] || ''}`;
+  $('summary').innerHTML = ['blocker', 'major', 'minor', 'total'].map((key) => {
+    const n = result.summary[key];
+    return `<span class="chip ${key}">${key}: ${n}</span>`;
+  }).join('');
+  renderFindings();
+  section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function renderFindings() {
+  if (!lastResult) return;
+  const sev = $('filter-severity').value;
+  const cat = $('filter-category').value;
+  const rows = lastResult.findings.filter((f) => (sev === 'all' || f.severity === sev) && (cat === 'all' || f.category === cat));
+  const body = $('findings-body');
+  body.innerHTML = rows.map((f) => `<tr>
+    <td><span class="sev ${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span><br><span class="muted">${escapeHtml(f.ruleId)} · ${escapeHtml(f.category)}</span></td>
+    <td>${escapeHtml(f.file)}:${f.line}</td>
+    <td>${escapeHtml(f.rule)}${f.snippet ? `<code class="snippet">${escapeHtml(f.snippet)}</code>` : ''}</td>
+    <td>${escapeHtml(f.fix)}</td>
+  </tr>`).join('');
+  $('no-findings').hidden = rows.length > 0;
+}
+$('filter-severity').addEventListener('change', renderFindings);
+$('filter-category').addEventListener('change', renderFindings);
+
+// --- Report export --------------------------------------------------------
+function reportMarkdown() {
+  if (!lastResult) return '';
+  const lines = ['# Frappe Sensei review', '', `Verdict: **${lastResult.verdict}**`, '',
+    `Files checked: ${lastFiles.map((f) => f.path).join(', ')}`, '',
+    `Summary: ${lastResult.summary.blocker} blocker, ${lastResult.summary.major} major, ${lastResult.summary.minor} minor, ${lastResult.summary.total} total`, '',
+    '| Severity | File:line | Rule | Suggested fix |', '|---|---|---|---|'];
+  for (const f of lastResult.findings) {
+    lines.push(`| ${f.severity} | ${f.file}:${f.line} | ${f.ruleId} ${f.rule} | ${f.fix} |`);
+  }
+  lines.push('', 'Rules from frappe_core_skills v2.3.0 — 35 checks.');
+  return lines.join('\n');
+}
+$('copy-report').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(reportMarkdown());
+    $('copy-report').textContent = 'Copied';
+    setTimeout(() => { $('copy-report').textContent = 'Copy report'; }, 2000);
+  } catch (e) {
+    showError('Copy failed — select the report text manually instead.');
+  }
+});
+$('download-report').addEventListener('click', () => {
+  const blob = new Blob([reportMarkdown()], { type: 'text/markdown' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'frappe-sensei-report.md';
+  link.click();
+  URL.revokeObjectURL(link.href);
+});

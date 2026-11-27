@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frappe Sensei — Review your Frappe / ERPNext code</title>
+<meta name="description" content="Paste Frappe / ERPNext code, upload files, or give a public GitHub link and get a review report against the frappe_core_skills rules. Runs in your browser, nothing is stored.">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap">
+    <h1>Frappe Sensei</h1>
+    <p class="tagline">Review your Frappe / ERPNext code against the <a href="https://github.com/irfanzahoor/frappe_core_skills">frappe_core_skills</a> rules — 35 checks, in your browser, in seconds.</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <p class="privacy"><strong>Privacy:</strong> your code never leaves this page, except when you give a GitHub URL — then only public files are fetched from GitHub. Nothing is stored, no login, and your code is never executed — it is only read.</p>
+
+  <section class="card" aria-label="Check your code">
+    <div class="tabs" role="tablist" aria-label="Input method">
+      <button class="tab active" data-tab="paste" role="tab" aria-selected="true">Paste code</button>
+      <button class="tab" data-tab="upload" role="tab" aria-selected="false">Upload files</button>
+      <button class="tab" data-tab="github" role="tab" aria-selected="false">GitHub URL</button>
+    </div>
+
+    <div class="panel active" id="panel-paste" role="tabpanel">
+      <label for="paste-filename">Filename <span class="hint">— the path matters: rules like FR-001 only fire in hooks.py</span></label>
+      <input id="paste-filename" type="text" value="my_app/hooks.py" spellcheck="false">
+      <label for="paste-code">Code</label>
+      <textarea id="paste-code" rows="12" spellcheck="false" placeholder="# Paste your .py or .js code here"></textarea>
+      <div class="row">
+        <button id="load-bad" type="button" class="btn secondary">Load bad example</button>
+        <button id="load-good" type="button" class="btn secondary">Load good example</button>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-upload" role="tabpanel">
+      <label for="file-input">Choose .py / .js / .html files (more than one is fine)</label>
+      <input id="file-input" type="file" multiple accept=".py,.js,.html,.jinja,.j2,.json">
+      <ul id="upload-list" class="file-list"></ul>
+      <p id="upload-empty" class="muted">No files chosen yet.</p>
+    </div>
+
+    <div class="panel" id="panel-github" role="tabpanel">
+      <label for="github-url">Public GitHub repo URL</label>
+      <input id="github-url" type="url" placeholder="https://github.com/irfanzahoor/frappe_core_skills" spellcheck="false">
+      <p class="muted">Public repos only. The file list comes from the public GitHub API (60 requests/hour without a login), and file contents are fetched as raw files. Private repos cannot be checked this way.</p>
+      <div class="row">
+        <button id="github-fetch" type="button" class="btn secondary">Fetch file list</button>
+        <button id="github-check-all" type="button" class="btn secondary" disabled>Check all (max 50)</button>
+      </div>
+      <ul id="github-list" class="file-list"></ul>
+      <p id="github-empty" class="muted">No repo loaded yet.</p>
+    </div>
+
+    <div class="actions">
+      <button id="run-btn" type="button" class="btn primary">Check my code</button>
+      <button id="clear-btn" type="button" class="btn secondary">Clear</button>
+      <span id="busy" class="busy" hidden>Checking…</span>
+    </div>
+    <p id="error" class="error" role="alert" hidden></p>
+  </section>
+
+  <section id="results" class="card" hidden aria-label="Results">
+    <div id="verdict" class="verdict"></div>
+    <div id="summary" class="summary"></div>
+    <div class="row filters">
+      <label>Severity
+        <select id="filter-severity">
+          <option value="all">All</option>
+          <option value="blocker">Blocker</option>
+          <option value="major">Major</option>
+          <option value="minor">Minor</option>
+        </select>
+      </label>
+      <label>Category
+        <select id="filter-category">
+          <option value="all">All</option>
+          <option value="placement">Placement</option>
+          <option value="apis">APIs</option>
+          <option value="server-client">Server vs Client</option>
+          <option value="security">Security</option>
+          <option value="performance">Performance</option>
+        </select>
+      </label>
+      <button id="copy-report" type="button" class="btn secondary">Copy report</button>
+      <button id="download-report" type="button" class="btn secondary">Download report (.md)</button>
+    </div>
+    <div class="table-wrap">
+      <table id="findings-table">
+        <thead>
+          <tr><th>Severity</th><th>File:line</th><th>Rule</th><th>Suggested fix</th></tr>
+        </thead>
+        <tbody id="findings-body"></tbody>
+      </table>
+    </div>
+    <p id="no-findings" class="muted" hidden>No findings with the current filters.</p>
+  </section>
+
+  <section class="card limits" aria-label="Limits">
+    <h2>Limits — what this checker cannot do yet</h2>
+    <ul>
+      <li><strong>FR-002</strong> (another app's files edited): a path check only. It fires when a file path contains <code>apps/frappe/</code>, <code>apps/erpnext/</code> and similar — loose pasted snippets with no app path cannot trigger it.</li>
+      <li><strong>FR-007</strong> (Custom Field not a fixture): a comment that merely talks about custom fields can false-positive. The <code>fixtures/</code> path is the signal, not the code.</li>
+      <li><strong>FR-018</strong> (validation only in JS): a heuristic. A JS <code>validate</code> handler is flagged unless a <code>.py</code> file in the same check defines <code>validate</code> / <code>before_submit</code> / <code>before_insert</code>.</li>
+      <li><strong>FR-030 / FR-031</strong> (loop detection): loops are tracked by Python indentation, not a full parser. Unusual formatting can be missed.</li>
+      <li>ZIP upload is not in this version — upload several files instead. AI fix suggestions, private repos and logins are out of scope for the MVP.</li>
+    </ul>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>Rules from <a href="https://github.com/irfanzahoor/frappe_core_skills">frappe_core_skills</a> v2.3.0 — 35 checks. See the full list in <a href="docs/RULES.md">docs/RULES.md</a>. Source: <a href="https://github.com/irfanzahoor/frappe-sensei">irfanzahoor/frappe-sensei</a>.</p>
+  </div>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
