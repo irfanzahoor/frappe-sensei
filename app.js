@@ -375,10 +375,10 @@ function renderFindings() {
   const rows = lastResult.findings.filter((f) => (sev === 'all' || f.severity === sev) && (cat === 'all' || f.category === cat));
   const body = $('findings-body');
   body.innerHTML = rows.map((f) => `<tr>
-    <td><span class="sev ${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span><br><span class="muted">${escapeHtml(f.ruleId)} · ${escapeHtml(f.category)}</span></td>
-    <td>${escapeHtml(f.file)}:${f.line}</td>
-    <td>${escapeHtml(f.rule)}${f.snippet ? `<code class="snippet">${escapeHtml(f.snippet)}</code>` : ''}</td>
-    <td>${escapeHtml(f.fix)}</td>
+    <td data-label="Severity"><span class="sev ${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span><span class="rule-id">${escapeHtml(f.ruleId)} · ${escapeHtml(f.category)}</span></td>
+    <td data-label="File:line" class="file-cell">${escapeHtml(f.file)}:${f.line}</td>
+    <td data-label="Rule">${escapeHtml(f.rule)}${f.snippet ? `<code class="snippet">${escapeHtml(f.snippet)}</code>` : ''}</td>
+    <td data-label="Suggested fix">${escapeHtml(f.fix)}</td>
   </tr>`).join('');
   $('no-findings').hidden = rows.length > 0;
 }

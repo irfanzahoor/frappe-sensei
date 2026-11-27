@@ -1,4 +1,6 @@
-/* Frappe Sensei — dark-blue #0b2a5b + white, professional and simple. */
+/* Frappe Sensei — dark-blue #0b2a5b + white, professional and simple.
+   Layout: full-width cards (1200px, 1280px on very wide screens), findings
+   table on desktop, stacked finding cards on mobile — nothing truncated. */
 :root {
   --navy: #0b2a5b;
   --navy-dark: #08203f;
@@ -23,7 +25,8 @@ body {
   background: var(--bg);
   line-height: 1.55;
 }
-.wrap { max-width: 960px; margin: 0 auto; padding: 0 16px; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+@media (min-width: 1440px) { .wrap { max-width: 1280px; } }
 .site-header { background: var(--navy); color: #fff; padding: 28px 0 22px; }
 .site-header h1 { margin: 0 0 6px; font-size: 2rem; }
 .site-header .tagline { margin: 0; color: #d7e2f2; }
@@ -33,7 +36,7 @@ main { padding: 20px 0 32px; }
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 18px;
+  padding: 20px 22px;
   margin-bottom: 18px;
 }
 .privacy {
@@ -57,7 +60,7 @@ main { padding: 20px 0 32px; }
 .panel.active { display: block; }
 label { display: block; font-weight: 600; margin: 12px 0 6px; }
 .hint, .muted { color: var(--muted); font-weight: 400; font-size: 0.9rem; }
-input[type="text"], input[type="url"], textarea, select {
+input[type="text"], input[type="url"], input[type="password"], textarea, select {
   width: 100%;
   padding: 10px;
   border: 1px solid var(--border);
@@ -120,17 +123,43 @@ textarea { font-family: ui-monospace, "JetBrains Mono", Consolas, monospace; fon
 .chip.blocker { border-color: var(--red); color: var(--red); }
 .chip.major { border-color: var(--amber); color: var(--amber); }
 .chip.minor { border-color: var(--muted); color: var(--muted); }
+.filters { margin-bottom: 14px; }
 .filters label { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
 .filters select { width: auto; padding: 6px; }
+
+/* Findings table (desktop): fixed column widths, full text wraps, nothing
+   is cut off — long file paths and long fixes wrap instead of squeezing. */
 .table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
-th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #eef1f5; vertical-align: top; }
+table { width: 100%; border-collapse: collapse; font-size: 0.95rem; table-layout: fixed; }
+table th:nth-child(1), table td:nth-child(1) { width: 118px; }
+table th:nth-child(2), table td:nth-child(2) { width: 22%; }
+table th:nth-child(3), table td:nth-child(3) { width: 33%; }
+th, td {
+  text-align: left;
+  padding: 12px 10px;
+  border-bottom: 1px solid #eef1f5;
+  vertical-align: top;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
 th { background: var(--navy); color: #fff; }
+tbody tr:nth-child(even) { background: #f8fafc; }
+tbody tr:hover { background: #eef4fb; }
+td.file-cell { font-family: ui-monospace, Consolas, monospace; font-size: 0.88rem; overflow-wrap: anywhere; }
 td code, .limits code { font-size: 0.88rem; background: #eef1f5; padding: 1px 5px; border-radius: 4px; }
-.sev { font-weight: 700; text-transform: capitalize; }
-.sev.blocker { color: var(--red); }
-.sev.major { color: var(--amber); }
-.sev.minor { color: var(--muted); }
+.sev {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.sev.blocker { background: var(--red-bg); color: var(--red); }
+.sev.major { background: var(--amber-bg); color: var(--amber); }
+.sev.minor { background: #eef1f5; color: var(--muted); }
+.rule-id { display: block; margin-top: 4px; font-size: 0.85rem; color: var(--muted); }
 .snippet {
   display: block;
   margin-top: 6px;
@@ -147,8 +176,60 @@ td code, .limits code { font-size: 0.88rem; background: #eef1f5; padding: 1px 5p
 #report-text { min-height: 220px; }
 .site-footer { border-top: 1px solid var(--border); padding: 18px 0 28px; color: var(--muted); font-size: 0.9rem; }
 .site-footer a { color: var(--accent); }
-@media (max-width: 640px) {
+
+/* Wide screens: use the width — the Limits list flows into two columns. */
+@media (min-width: 1024px) {
+  .limits ul { columns: 2; column-gap: 36px; }
+  .limits li { break-inside: avoid; margin-bottom: 8px; }
+}
+
+/* Tablet: narrower cards, table still a table but with more room per cell. */
+@media (max-width: 1023px) {
+  .wrap { padding: 0 16px; }
+  table th:nth-child(1), table td:nth-child(1) { width: 104px; }
+  table th:nth-child(2), table td:nth-child(2) { width: 24%; }
+}
+
+/* Mobile: findings become stacked cards — no horizontal scrolling, no
+   cut-off text. Each cell shows its column name as a small label. */
+@media (max-width: 760px) {
   .site-header h1 { font-size: 1.6rem; }
-  .card { padding: 14px; }
-  .filters { flex-direction: column; align-items: flex-start; }
+  .card { padding: 16px; }
+  .tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .tab { flex-shrink: 0; }
+  .filters { flex-direction: column; align-items: stretch; }
+  .filters .btn { width: 100%; }
+  .actions .btn.primary { width: 100%; }
+  .table-wrap { overflow-x: visible; }
+  #findings-table, #findings-table tbody, #findings-table tr, #findings-table td { display: block; width: 100%; }
+  #findings-table thead { display: none; }
+  #findings-table { table-layout: auto; }
+  #findings-table tr {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    padding: 6px 14px 10px;
+    background: #fff;
+  }
+  #findings-table td { border: none; padding: 8px 0 0; }
+  #findings-table td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+  #findings-table td:last-child { padding-bottom: 4px; }
+  .snippet { font-size: 0.82rem; }
+}
+
+/* Very small phones: tighter spacing, full-width buttons. */
+@media (max-width: 520px) {
+  .wrap { padding: 0 12px; }
+  .card { padding: 14px 12px; }
+  .row .btn { flex: 1 1 auto; }
+  .verdict { font-size: 1.05rem; }
 }
