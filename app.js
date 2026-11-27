@@ -1,6 +1,6 @@
 // Frappe Sensei — web UI (MVP Day 6-7).
 // Static page, no framework, no build step. The only network calls are:
-//   1. fetch('rules/rules.json') — the 74 rules, same origin.
+//   1. fetch('rules/rules.json') — the 79 rules, same origin.
 //   2. api.github.com + raw.githubusercontent.com — only when the user
 //      gives a GitHub URL. No other network, no login, and user code is
 //      never executed. An optional GitHub token, if the user pastes one,
@@ -395,7 +395,7 @@ function reportMarkdown() {
   for (const f of lastResult.findings) {
     lines.push(`| ${f.severity} | ${f.file}:${f.line} | ${f.ruleId} ${f.rule} | ${f.fix} |`);
   }
-  lines.push('', 'Rules from frappe_core_skills v2.3.0 — 74 checks.');
+  lines.push('', 'Rules from frappe_core_skills v2.3.0 — 79 checks.');
   return lines.join('\n');
 }
 // --- Report export --------------------------------------------------------

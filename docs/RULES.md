@@ -1,14 +1,14 @@
 # Frappe Sensei — Review Rules
 
-74 deterministic, statically checkable rules. The checker reads code only — it never runs it, and nothing is stored.
+79 deterministic, statically checkable rules. The checker reads code only — it never runs it, and nothing is stored.
 
-Source: `frappe_core_skills` v2.3.0 — [irfanzahoor/frappe_core_skills](https://github.com/irfanzahoor/frappe_core_skills) — for FR-001 to FR-035. FR-036 to FR-043 come from the Impertio-Studio/Frappe_Claude_Skill_Package review (61 skills, 2026-11-27); only the rule ideas were borrowed, in our own wording — their licence is inconsistent (README/package.json say MIT, LICENSE.md is LGPL v3), so no text was copied. FR-044 to FR-059 come from the official [frappe/skills](https://github.com/frappe/skills) review (12 skills, 2026-11-27); only the rule ideas were borrowed, in our own wording — that repo has no licence file, so no text was copied. FR-040 was corrected in the same round (see below): its source is now frappe/skills, not Impertio. FR-060 to FR-076 come from the second pass over the same official frappe/skills review (candidates #17–#34, 2026-11-27); only the rule ideas were borrowed, in our own wording. The machine-readable form of these rules is `rules/rules.json`.
+Source: `frappe_core_skills` v2.3.0 — [irfanzahoor/frappe_core_skills](https://github.com/irfanzahoor/frappe_core_skills) — for FR-001 to FR-035. FR-036 to FR-043 come from the Impertio-Studio/Frappe_Claude_Skill_Package review (61 skills, 2026-11-27); only the rule ideas were borrowed, in our own wording — their licence is inconsistent (README/package.json say MIT, LICENSE.md is LGPL v3), so no text was copied. FR-044 to FR-059 come from the official [frappe/skills](https://github.com/frappe/skills) review (12 skills, 2026-11-27); only the rule ideas were borrowed, in our own wording — that repo has no licence file, so no text was copied. FR-040 was corrected in the same round (see below): its source is now frappe/skills, not Impertio. FR-060 to FR-076 come from the second pass over the same official frappe/skills review (candidates #17–#34, 2026-11-27); only the rule ideas were borrowed, in our own wording. FR-078 to FR-082 come from the [lubusIN/frappe-skills](https://github.com/lubusIN/frappe-skills) review (14 skills, MIT) and the [Dkm0315/frappe-agent](https://github.com/Dkm0315/frappe-agent) review (18 skills + 16 commands, MIT) (2026-11-27); only the rule ideas were borrowed, in our own wording. The machine-readable form of these rules is `rules/rules.json`.
 
 Severity follows `agents/frappe-reviewer.md`: **blocker** = wrong placement, JS-only validation, missing permission check, SQL injection risk, `frappe.db.commit()` in a request; **major** = untranslated strings, `raise Exception`, N+1 query, `["*"]` fields, duplicate handlers; **minor** = style, missing `flt`/`cint`, field behaviour set in JS that belongs in the DocType.
 
-Totals: 74 rules — 18 blocker, 45 major, 11 minor. Categories: Placement 9, Framework APIs 25, Server vs Client 4, Security 26, Performance 10.
+Totals: 79 rules — 18 blocker, 49 major, 12 minor. Categories: Placement 9, Framework APIs 27, Server vs Client 5, Security 27, Performance 11.
 
-## All 74 rules
+## All 79 rules
 
 | ID | Severity | Category | Title | Source |
 |----|----------|----------|-------|--------|
@@ -86,6 +86,11 @@ Totals: 74 rules — 18 blocker, 45 major, 11 minor. Categories: Placement 9, Fr
 | FR-074 | major | security | Mass assignment: doc.update() with request data, or get_doc(json.loads(...)) | frappe/skills — skills/deep-app-audit/security/H-business-logic/H01-mass-assignment.md |
 | FR-075 | major | security | Open redirect: redirect_to / flags.redirect with a request value and no validation | frappe/skills — skills/deep-app-audit/security/F-ssrf-outbound/F03-open-redirect.md |
 | FR-076 | major | security | Server-side request forgery: requests / urlopen / httpx with a request-controlled URL | frappe/skills — skills/deep-app-audit/security/F-ssrf-outbound/F01-ssrf.md |
+| FR-078 | major | apis | Controller class name does not match its DocType file | lubusIN/frappe-skills — doctype-development/SKILL.md |
+| FR-079 | major | apis | Another document created or saved inside validate() / before_save() | lubusIN/frappe-skills — doctype-development/references/controllers.md |
+| FR-080 | major | performance | External HTTP call inside validate() / before_save() blocks every save | lubusIN/frappe-skills — doctype-development/references/controllers.md |
+| FR-081 | minor | server-client | Synchronous frappe.call (async: false) freezes the Desk UI | lubusIN/frappe-skills — desk-customization/SKILL.md |
+| FR-082 | major | security | Secret value written to a log or print output | lubusIN/frappe-skills — api-development/references/authentication.md |
 
 ## Rule changes — FR-040 corrected + 16 new rules from the official frappe/skills review (2026-11-27)
 
@@ -133,6 +138,34 @@ The second-pass candidates #17–#34 from the same review were worked through on
 - **FR-076 (major):** `requests.get/post/...` / `urllib.request.urlopen` / `httpx.get/post` / `frappe.make_get_request` / `make_post_request` / `make_request` whose URL argument is directly `frappe.form_dict` / `frappe.local.request`, a variable assigned from one, or (in a whitelisted function) one of its parameters. A URL from `frappe.conf` or a settings value does not fire.
 
 Re-runs before pushing: the 6 FMC files are unchanged at 4 findings (the known FR-023 cross-file delegates — FR-063 is exempt in the seed file). ERPNext `sales_order.py` goes from 8 to 10 findings: FR-072 fires twice, both true positives per the rule — a direct `set_value("Opportunity", ..., "status", ...)` status sync in `update_enquiry_status` (line 525) and `self.db_set("status", "Cancelled")` in `on_cancel` (line 624). Both are deliberate core patterns; the rule flags the mechanism (a direct status write bypasses validate and the workflow), so they stay flagged. No new rule false-positives on either file. Tests: 215 passed, 0 failed (74 rules bad+good, 3 verdict, 138 regression, including 53 new regression for FR-060 to FR-076).
+
+## Rule changes — 5 useful rules from the lubusIN + Dkm0315 review (2026-11-27)
+
+The two packages not yet reviewed for rules — [lubusIN/frappe-skills](https://github.com/lubusIN/frappe-skills) (14 skills, MIT, 72 stars) and [Dkm0315/frappe-agent](https://github.com/Dkm0315/frappe-agent) (18 skills + 16 commands, MIT, 27 stars) — were read in full, skill by skill, plus the lubusIN reference files. The MCP neighbours (Frappe Assistant Core, Casys-AI/mcp-erpnext, Cec1c/ERPNext-MCP) were checked too and carry no deterministic code-check patterns — they are runtime API bridges, not review guidance. 5 rules were implemented, FR-078 to FR-082, taking the tool from 74 to 79 checks. Only the rule ideas were taken; every title, description, example and fix is written in our own words. Ideas that did not qualify are in "Reviewed but not added" below.
+
+- **FR-078 (major):** a controller class in a `/doctype/` folder whose name, lowercased, is not the file stem with underscores removed (`class Invoice` in `sales_order.py`). Frappe loads the controller by that name, so a mismatch means the controller never loads and its lifecycle methods silently never run. The comparison is case-insensitive, so acronym casing does not fire — FMC's `FMManufacturingPolicy` in `fm_manufacturing_policy.py` is fine. Only classes extending `Document` (directly or through a `*Controller` base) are checked, and only in `/doctype/` folders.
+- **FR-079 (major):** creating (`.insert()`) or saving (`.save()` on a variable other than `self`/`doc`) another document inside `validate()` or `before_save()` — the document may never save, so the side effect runs on every save attempt. `self.save()` is FR-036, not this rule; a chained `frappe.get_doc(...).save()` also fires. Creating or saving in `after_save` / `on_submit` does not fire.
+- **FR-080 (major):** a synchronous external HTTP call (`requests.*` / `urllib.request.urlopen` / `httpx.*` / `frappe.make_*_request`) inside `validate()` or `before_save()` — it blocks every save on the network. The same call in `on_update` or a whitelisted method does not fire here (that is the normal place for external sync); `frappe.enqueue` in `validate` does not fire either.
+- **FR-081 (minor):** `frappe.call({...})` containing `async: false` — a synchronous request that freezes the whole Desk UI until the server answers. The call object may span lines; the check joins it first. `async: true` or no `async` key does not fire.
+- **FR-082 (major):** a secret value passed to `print()` / `frappe.log()` / `frappe.log_error()` / a `logger.info|debug|warning|error|exception|critical()` call — it lands in plain text in log files. A message that only mentions a secret name as text does not fire (string literals are stripped); an f-string interpolation (`{token}`) is a value and does fire; logging only whether a secret is set (`bool(api_key)` / `len(password)`) does not fire.
+
+Re-runs before pushing: the 6 FMC files are unchanged at 4 findings, ERPNext `sales_order.py` is unchanged at 10 findings — no new rule fires on either. The whole FMC app (150 `.py` files) and the hub demo app (12 files) were also re-run: zero new-rule findings on either, including all four FMC controllers for FR-078 (the `FM*` acronym case). Tests: 236 passed, 0 failed (79 rules bad+good, 3 verdict, 154 regression, including 16 new regression for FR-078 to FR-082).
+
+## Reviewed but not added — lubusIN + Dkm0315 round (2026-11-27)
+
+These ideas were read in the two packages and deliberately NOT turned into rules. No IDs were consumed for them.
+
+- **Function definitions in `hooks.py` (lubusIN app-development, "logic in hooks.py"):** already FR-001 — a `def` with a body in `hooks.py` fires there. Not a new rule.
+- **Webhook handler that reads a signature header but never verifies it (Dkm0315 frappe-payments, "verify webhook signatures where supported"):** no sound static check exists. Identifying a webhook handler (a function that reads a signature header) is fragile, verification may live in a gateway SDK or a helper the checker cannot follow, and neither FMC nor `sales_order.py` contains webhook code to prove a low false-positive rate against. Left out rather than forced.
+- **Real HTTP calls in test files without mocking (lubusIN testing, "mock external services"):** integration tests legitimately call real (sandbox) APIs, and ERPNext core's own test suites do this — a rule here would flag accepted core test practice. Left out.
+- **Script Report `execute()` without a permission check (lubusIN reports):** many ERPNext core script reports do not call `has_permission` in `execute()` — report access is governed by the Report's own permissions — so this would false-positive on core. Left out.
+- **Unbounded report queries / no LIMIT (lubusIN reports):** core reports routinely have no `LIMIT`; the query is bounded by filters instead. Left out.
+- **Misspelled JS form event names (lubusIN desk-customization):** a `frappe.ui.form.on` handler key can be any fieldname (a field-change handler), so the key space is open — a misspelled event name cannot be distinguished from a fieldname statically. The Python twin is FR-053. Left out.
+- **Hardcoded role names (lubusIN enterprise-patterns):** ERPNext core checks literal role names (`"System Manager" in frappe.get_roles()`) everywhere; flagging that would fire on core. Left out.
+- **`frappe.get_all` in a Jinja template (lubusIN printing-templates):** standard practice in print formats — the template runs with the document's permission context — so flagging it would false-positive on core print formats. Left out.
+- **DocType field discipline and naming (Dkm0315 frappe-doctype-design, lubusIN doctype-development):** empty sections, vanity fields, fieldname conventions — all need the DocType JSON, not just code. Out of scope for this round (same as the Phase 2 DocType-JSON work).
+- **Rate limiting for public APIs (lubusIN api-development):** Frappe has no rate-limit API to detect the absence of; there is nothing checkable in code. Left out.
+- **MCP neighbours:** Frappe Assistant Core, Casys-AI/mcp-erpnext and Cec1c/ERPNext-MCP are runtime API bridges with their own safety notes (whitelists, confirmation flows) — no deterministic code-check patterns. Nothing was taken from them.
 
 ## Skipped second-pass candidates
 
@@ -219,7 +252,7 @@ reveals the markdown report at any time.
 
 ## Out of scope for Phase 1
 
-These were read in the v2.3.0 skills but are **not** in these 74 rules, because they are not deterministic static code checks:
+These were read in the v2.3.0 skills but are **not** in these 79 rules, because they are not deterministic static code checks:
 
 - **frappe-studio / frappe-flow / frappe-insights** — all five new v2.3.0 skills were fetched and read. Studio, Flow and Insights are config and product guidance (export to git, one agent one job, never share salary data on a public dashboard), not code patterns the checker can flag. No rule was invented from them.
 - **frappe-data** — backup-before-delete, preview-before-import and test-on-staging are process rules, not code patterns. Its one code rule (never raw SQL deletes / writes) is already covered by FR-022.
@@ -232,6 +265,6 @@ These were read in the v2.3.0 skills but are **not** in these 74 rules, because 
 
 1. Edit `rules/rules.json` only — it is the single source of truth. Never edit this table by hand; regenerate it from `rules.json`.
 2. Every rule needs a `source` file in `frappe_core_skills` (skill file, reference, agent or command) and a `pattern` concrete enough to implement in JavaScript (regex, AST node, or file-structure check).
-3. Keep the ID sequence FR-001 to FR-076 in order: category first, then severity (blocker, major, minor). New rules go at the end with the next free ID; never reuse or renumber an old ID. Skipped IDs stay unused (FR-068, FR-073 and FR-077 were skipped second-pass candidates — see "Skipped second-pass candidates" above).
+3. Keep the ID sequence FR-001 to FR-082 in order: category first, then severity (blocker, major, minor). New rules go at the end with the next free ID; never reuse or renumber an old ID. Skipped IDs stay unused (FR-068, FR-073 and FR-077 were skipped second-pass candidates — see "Skipped second-pass candidates" above).
 4. Keep severity aligned with `agents/frappe-reviewer.md`. Do not upgrade a minor to a blocker to make a report look stronger.
 5. Validate before pushing: `python3 -m json.tool rules/rules.json` must pass, the count must be exactly the number in this file's table, and every rule must have all 11 fields (`id`, `category`, `severity`, `title`, `description`, `pattern`, `example_bad`, `example_good`, `fix`, `source`, `versions`).

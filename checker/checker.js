@@ -87,6 +87,11 @@ export const RULES = [
   { id: 'FR-074', severity: 'major', category: 'security', title: 'Mass assignment: doc.update() with request data, or get_doc(json.loads(...))', fix: 'Copy only the fields the endpoint allows into a new dict (an explicit allowlist), validate each one, then update the document with that dict.' },
   { id: 'FR-075', severity: 'major', category: 'security', title: 'Open redirect: redirect_to / flags.redirect with a request value and no validation', fix: 'Allow only relative paths or URLs on a fixed allowlist of hosts; validate with urlparse and reject anything that does not start with / or the app\'s own domain.' },
   { id: 'FR-076', severity: 'major', category: 'security', title: 'Server-side request forgery: requests / urlopen / httpx with a request-controlled URL', fix: 'Build the URL server-side from a fixed allowlist of hosts or from frappe.conf; never let a request parameter choose the host or scheme.' },
+  { id: 'FR-078', severity: 'major', category: 'apis', title: 'Controller class name does not match its DocType file', fix: 'Name the controller class after the DocType: remove the spaces from the DocType name (Sales Order becomes SalesOrder) and use exactly that name in the file named after the DocType.' },
+  { id: 'FR-079', severity: 'major', category: 'apis', title: 'Another document created or saved inside validate() / before_save()', fix: 'Move document creation and saves of other documents to after_save, on_submit, or a background job; validate() and before_save() should only check and normalise this document.' },
+  { id: 'FR-080', severity: 'major', category: 'performance', title: 'External HTTP call inside validate() / before_save() blocks every save', fix: 'Fetch external data in a background job or cache it and read the cached value in validate(); never call the network from a lifecycle method that runs on every save.' },
+  { id: 'FR-081', severity: 'minor', category: 'server-client', title: 'Synchronous frappe.call (async: false) freezes the Desk UI', fix: 'Drop async: false and use the callback (or await frappe.xcall) — frappe.call is asynchronous by default and the UI stays responsive.' },
+  { id: 'FR-082', severity: 'major', category: 'security', title: 'Secret value written to a log or print output', fix: 'Log only that a secret is set or that an operation failed, never the secret itself; mask it first if it must appear in a message.' },
 ];
 
 const OTHER_APP_RE = /(^|\/)apps\/(frappe|erpnext|hrms|crm|helpdesk)\//;
@@ -159,6 +164,35 @@ function isCommentPy(line) {
 function stripStrings(s) {
   // Remove single/double-quoted string literals (best effort, single line).
   return s.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''");
+}
+
+// FR-082 helper: does a log/print call argument contain a secret VALUE?
+// A message that merely mentions a secret name is a string literal and
+// is stripped first, so it does not fire. F-string interpolations
+// ({...}) are values, not text, so they are kept. Logging only whether
+// a secret is set — bool(secret) / len(secret) — does not fire. An
+// identifier counts as secret-named when one of its underscore-separated
+// parts is secret/password/passwd/token, or when the whole name (minus
+// separators) is a known secret name (api_key, api_secret, client_secret,
+// access_token, auth_token, private_key, secret_key). A word that merely
+// contains "token" (tokenizer) does not fire.
+const SECRET_NAME_RE = /^(?:secret|password|passwd|token|apikey|apisecret|clientsecret|accesstoken|refreshtoken|authtoken|privatekey|secretkey)$/;
+function hasSecretIdentifier(argText) {
+  const kept = argText.replace(/f(['"])(?:[^\\]|\\.)*?\1/g, (m) => {
+    const parts = [];
+    const re = /\{([^{}]+)\}/g;
+    let mm;
+    while ((mm = re.exec(m)) !== null) parts.push(mm[1]);
+    return parts.length ? ' ' + parts.join(' ') + ' ' : "''";
+  });
+  const stripped = stripStrings(kept).replace(/\b(?:bool|len)\s*\([^)]*\)/g, '');
+  const idents = stripped.match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
+  for (const id of idents) {
+    const parts = id.toLowerCase().split('_');
+    if (parts.some((p) => p === 'secret' || p === 'password' || p === 'passwd' || p === 'token')) return true;
+    if (SECRET_NAME_RE.test(id.toLowerCase().replace(/_/g, ''))) return true;
+  }
+  return false;
 }
 
 // Join a call starting at lines[i] from column startCol, following
@@ -676,6 +710,11 @@ export function checkFiles(files, rulesInput) {
         }
         // FR-026: hardcoded secret assigned to a secret-named variable.
         if (/^\s*(?:[A-Za-z0-9_]*?(?:api[_-]?key|password|secret|token)[A-Za-z0-9_]*)\s*=\s*['"][^'"]{12,}['"]/i.test(line) && !/frappe\.conf|getenv|os\.environ/.test(line)) add('FR-026', path, i);
+        // FR-082: a secret value written to a log or print output. A
+        // message that only mentions a secret name does not fire (the
+        // string is stripped); hasSecretIdentifier keeps f-string
+        // interpolations, which are values. print() also fires FR-011.
+        if (/(?:^\s*print\s*\(|frappe\.log(?:_error)?\s*\(|frappe\.logger\s*\(\s*\)\s*\.\s*(?:info|debug|warning|error|exception|critical)\s*\(|(?:logger|log)\.(?:info|debug|warning|error|exception|critical)\s*\()/.test(line) && hasSecretIdentifier(line)) add('FR-082', path, i);
         // FR-029: frappe.db.commit() inside a def (controller / hook / request).
         if (/frappe\.db\.commit\s*\(/.test(line) && !/patches\//.test(path)) {
           // Only flag when inside a function body (checked below by def scan);
@@ -1141,6 +1180,22 @@ export function checkFiles(files, rulesInput) {
           }
         }
       }
+      // FR-078: controller class name must match its DocType file.
+      // Only in /doctype/ folders, only classes extending Document
+      // (directly or through a *Controller base). The comparison is
+      // case-insensitive, so acronym casing (FMManufacturingPolicy in
+      // fm_manufacturing_policy.py) does not fire — only a genuinely
+      // different name does, which means Frappe never loads the
+      // controller and its lifecycle methods silently never run.
+      if (/\/doctype\//.test(path)) {
+        const stem = (path.split('/').pop() || '').replace(/\.py$/i, '').replace(/_/g, '').toLowerCase();
+        for (let i = 0; i < lines.length; i++) {
+          const cm = /^class\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*:/.exec(lines[i]);
+          if (!cm) continue;
+          if (!/\b(Document|WebsiteGenerator|[A-Za-z_][A-Za-z0-9_]*Controller)\b/.test(cm[2])) continue;
+          if (cm[1].toLowerCase() !== stem) add('FR-078', path, i);
+        }
+      }
       // FR-036 / FR-037 / FR-038 — controller lifecycle methods.
       {
         const fns = parsePyFunctions(lines);
@@ -1170,6 +1225,28 @@ export function checkFiles(files, rulesInput) {
           if (fn.name === 'validate') {
             // FR-038: overridden validate() without super().validate().
             if (!/super\(\)\.validate\s*\(/.test(bodyText)) add('FR-038', path, fn.line);
+          }
+          if (fn.name === 'validate' || fn.name === 'before_save') {
+            // FR-079: creating or saving another document inside
+            // validate / before_save — the document may never save, so
+            // the side effect runs on every save attempt. self.save()
+            // is FR-036, not this rule. String literals are stripped
+            // first, so a message mentioning insert() does not fire.
+            // FR-080: a synchronous external HTTP call inside validate
+            // / before_save blocks every save on the network. The same
+            // call in on_update or a whitelisted method is the normal
+            // place for external sync and does not fire here.
+            for (const b of fn.bodyLines) {
+              if (isCommentPy(b.text)) continue;
+              const stripped = stripStrings(b.text);
+              if (/\.insert\s*\(/.test(stripped)) { add('FR-079', path, b.line); continue; }
+              const sv = /(?:^|[^\w.])([A-Za-z_][A-Za-z0-9_]*)\.save\s*\(/.exec(stripped);
+              if (sv && sv[1] !== 'self' && sv[1] !== 'doc') add('FR-079', path, b.line);
+              // A chained frappe.get_doc(...).save() is the same side
+              // effect; a bare doc.save() is FR-036, not this rule.
+              else if (/frappe\.get_doc\s*\([^)]*\)\s*\.save\s*\(/.test(stripped)) add('FR-079', path, b.line);
+              if (/requests\.(?:get|post|put|patch|delete|head|request)\s*\(|urllib\.request\.urlopen\s*\(|httpx\.(?:get|post|put|patch|delete|head|request)\s*\(|frappe\.make_(?:get|post)_request\s*\(|frappe\.make_request\s*\(/.test(stripped)) add('FR-080', path, b.line);
+            }
           }
           // FR-053: a misspelled lifecycle method name in a controller
           // class. Ordinary helper methods with unrelated names do not
@@ -1564,9 +1641,13 @@ export function checkFiles(files, rulesInput) {
         // FR-020: field behaviour set in JS.
         if (/frm\.(toggle_reqd|set_df_property)\s*\(/.test(line)) add('FR-020', path, i);
         // FR-021: frappe.call inside refresh.
+        // FR-081: frappe.call with async: false freezes the Desk UI.
+        // The call object may span lines, so join the call text first.
         if (/frappe\.call\s*\(/.test(line)) {
           const handler = enclosingJsHandler(lines, i);
           if (handler === 'refresh') add('FR-021', path, i);
+          const { text } = joinCallText(lines, i, line.indexOf('frappe.call'));
+          if (/async\s*:\s*false\b/.test(text)) add('FR-081', path, i);
         }
         // FR-026: hardcoded secret in JS.
         if (/(?:api[_-]?key|password|secret|token)\s*[:=]\s*['"][^'"]{12,}['"]/i.test(line) && !/frappe\.conf/.test(line)) add('FR-026', path, i);

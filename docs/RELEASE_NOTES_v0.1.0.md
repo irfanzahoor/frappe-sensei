@@ -156,6 +156,41 @@ were taken, in our own wording — that repo has no licence file.
   (Pages has not rebuilt since 0f17cf5). The 74 checks show there only
   after the next Pages build, triggered by a real file-change push.
 
+### Added after v0.1.0 — 5 useful rules from the lubusIN + Dkm0315 review (2026-11-27)
+
+The two packages not yet reviewed for rules — lubusIN/frappe-skills
+(14 skills, MIT) and Dkm0315/frappe-agent (18 skills + 16 commands,
+MIT) — were read in full, skill by skill, plus the lubusIN reference
+files. The MCP neighbours (Frappe Assistant Core, Casys-AI/mcp-erpnext,
+Cec1c/ERPNext-MCP) were checked too and carry no deterministic
+code-check patterns. 5 rules were implemented (FR-078 to FR-082),
+taking the tool from 74 to 79 checks. Only the rule ideas were taken,
+in our own wording. Ideas that did not qualify are listed in
+`docs/RULES.md` ("Reviewed but not added").
+
+- **FR-078 (major):** controller class name does not match its DocType
+  file (case-insensitive — FMC's `FMManufacturingPolicy` in
+  `fm_manufacturing_policy.py` does not fire).
+- **FR-079 (major):** another document created or saved inside
+  `validate()` / `before_save()`; `self.save()` stays FR-036.
+- **FR-080 (major):** external HTTP call inside `validate()` /
+  `before_save()` blocks every save; the same call in `on_update`
+  does not fire here.
+- **FR-081 (minor):** `frappe.call` with `async: false` freezes the
+  Desk UI; `async: true` or no `async` key does not fire.
+- **FR-082 (major):** a secret value passed to `print()` / `frappe.log()`
+  / `frappe.log_error()` / a logger call; a message that only mentions
+  a secret name, or `bool(api_key)`, does not fire.
+- Re-runs before pushing: the 6 FMC files are unchanged at 4 findings
+  and ERPNext `sales_order.py` is unchanged at 10 findings — no new
+  rule fires on either. The whole FMC app (150 `.py` files) and the hub
+  demo app (12 files) were also re-run: zero new-rule findings on
+  either. Tests: 236 passed, 0 failed (79 rules bad+good, 3 verdict,
+  154 regression, including 16 new regression for FR-078 to FR-082).
+- **Live site note:** the live site still serves the v0.1.0 build
+  (Pages has not rebuilt since 0f17cf5). The 79 checks show there only
+  after the next Pages build, triggered by a real file-change push.
+
 ## What changed since the first build
 
 ### Fix round 1 — FR-023 and FR-032 narrowed (2026-11-27)

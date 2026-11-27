@@ -1,7 +1,7 @@
 # Frappe Sensei — Checker Engine
 
-The checker implements all 74 rules in `../rules/rules.json` (FR-001 to
-FR-076, skipping FR-068, FR-073 and FR-077) as a pure, dependency-free ES module. It reads code only — it never
+The checker implements all 79 rules in `../rules/rules.json` (FR-001 to
+FR-082, skipping FR-068, FR-073 and FR-077) as a pure, dependency-free ES module. It reads code only — it never
 runs it, sends it anywhere, or stores it.
 
 ## Files
@@ -315,6 +315,31 @@ any failure.
 - **FR-076 (SSRF):** a parameter counts as request-controlled only in
   a whitelisted function. A URL from `frappe.conf` or a settings value
   (`get_single_value` / `get_cached_value`) does not fire.
+- **FR-078 (controller class name):** only in a `.py` file under a
+  `/doctype/` folder, only for classes extending `Document` (directly
+  or through a `*Controller` base). The name comparison is
+  case-insensitive, so acronym casing (`FMManufacturingPolicy` in
+  `fm_manufacturing_policy.py`) does not fire. A controller defined in
+  an `overrides/` module is not checked — it is not the DocType's own
+  file.
+- **FR-079 (other document created / saved in validate):** only in
+  `validate` / `before_save`. A `.save()` on `self` or `doc` is FR-036,
+  not this rule. A chained `frappe.get_doc(...).save()` fires; a
+  multi-line chain (`.save()` on a later line) does not.
+- **FR-080 (external HTTP in validate):** only in `validate` /
+  `before_save`. The same call in `on_update` or a whitelisted method
+  does not fire here, and neither does `frappe.enqueue` in `validate`.
+- **FR-081 (`async: false` in frappe.call):** the call object is
+  joined (up to 10 continuation lines) before checking for
+  `async: false`, like FR-043. `async: true` or no `async` key does
+  not fire.
+- **FR-082 (secret logged):** string literals are stripped before
+  checking, so a message that only mentions a secret name does not
+  fire; f-string interpolations (`{token}`) are values and do fire.
+  Logging only whether a secret is set (`bool(api_key)` /
+  `len(password)`) does not fire. A header dict logged whole
+  (`logger.info(headers)`) is not checked — the checker cannot tell
+  whether it contains an authorization header.
 - **Skipped second-pass candidates (no rule):** #25 (`set_value` on a
   child-table doctype) — a static check cannot tell a child-table
   doctype from a parent one without the DocType JSON, and ERPNext core

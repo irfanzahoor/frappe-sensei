@@ -38,8 +38,10 @@ function filesFor(id, kind) {
         : [{ path: 'my_app/my_app/overrides/sales_order.py', content: good }];
     case 'FR-003':
       return [{ path: 'my_app/hooks.py', content }];
-    case 'FR-004': case 'FR-005': case 'FR-012': case 'FR-020': case 'FR-021': case 'FR-028': case 'FR-041':
+    case 'FR-004': case 'FR-005': case 'FR-012': case 'FR-020': case 'FR-021': case 'FR-028': case 'FR-041': case 'FR-081':
       return [js];
+    case 'FR-078':
+      return [{ path: 'my_app/doctype/sales_order/sales_order.py', content }];
     case 'FR-039': case 'FR-040': case 'FR-071':
       return [{ path: 'my_app/hooks.py', content }];
     case 'FR-048':
@@ -895,6 +897,104 @@ for (const rule of rulesData.rules) {
     },
   ];
   for (const t of regression5) {
+    const result = checkFiles(t.files, rulesData);
+    const ok = has(result, t.id) === t.shouldHave;
+    if (ok) { passed++; console.log(`PASS ${t.name}`); }
+    else {
+      failed++;
+      failures.push(`${t.name}: expected ${t.id} ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
+      console.log(`FAIL ${t.name}: expected ${t.id} ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
+    }
+  }
+}
+
+// Regression tests for the lubusIN + Dkm0315 rules (FR-078 to FR-082,
+// 2026-11-27): the narrow forms and the exemptions the bad/good
+// examples do not cover.
+{
+  const regression6 = [
+    {
+      name: 'FR-078 (a) acronym casing (FMManufacturingPolicy in fm_manufacturing_policy.py) does not fire',
+      files: [{ path: 'my_app/doctype/fm_manufacturing_policy/fm_manufacturing_policy.py', content: 'class FMManufacturingPolicy(Document):\n    def validate(self):\n        pass\n' }],
+      id: 'FR-078', shouldHave: false,
+    },
+    {
+      name: 'FR-078 (b) controller class in a non-doctype path does not fire',
+      files: [{ path: 'my_app/overrides/sales_order.py', content: 'class Invoice(Document):\n    def validate(self):\n        pass\n' }],
+      id: 'FR-078', shouldHave: false,
+    },
+    {
+      name: 'FR-078 (c) genuine mismatch (class Invoice in sales_order.py) fires',
+      files: [{ path: 'my_app/doctype/sales_order/sales_order.py', content: 'class Invoice(Document):\n    def validate(self):\n        pass\n' }],
+      id: 'FR-078', shouldHave: true,
+    },
+    {
+      name: 'FR-078 (d) non-Document class with a different name does not fire',
+      files: [{ path: 'my_app/doctype/sales_order/sales_order.py', content: 'class SalesOrderHelper:\n    def run(self):\n        pass\n' }],
+      id: 'FR-078', shouldHave: false,
+    },
+    {
+      name: 'FR-079 (a) self.save() in validate is FR-036, not FR-079',
+      files: [{ path: 'sales_order.py', content: 'class SalesOrder(Document):\n    def validate(self):\n        self.save()\n' }],
+      id: 'FR-079', shouldHave: false,
+    },
+    {
+      name: 'FR-079 (b) .insert() in on_submit does not fire (only validate/before_save)',
+      files: [{ path: 'sales_order.py', content: 'class SalesOrder(Document):\n    def on_submit(self):\n        log = frappe.get_doc({"doctype": "Order Log"})\n        log.insert()\n' }],
+      id: 'FR-079', shouldHave: false,
+    },
+    {
+      name: 'FR-079 (c) chained frappe.get_doc(...).save() in validate fires',
+      files: [{ path: 'sales_order.py', content: 'class SalesOrder(Document):\n    def validate(self):\n        frappe.get_doc("Customer", self.customer).save()\n' }],
+      id: 'FR-079', shouldHave: true,
+    },
+    {
+      name: 'FR-080 (a) requests.get in on_update does not fire',
+      files: [{ path: 'sales_order.py', content: 'class SalesOrder(Document):\n    def on_update(self):\n        requests.get("https://api.example.com/notify")\n' }],
+      id: 'FR-080', shouldHave: false,
+    },
+    {
+      name: 'FR-080 (b) frappe.enqueue in validate does not fire (async is fine)',
+      files: [{ path: 'sales_order.py', content: 'class SalesOrder(Document):\n    def validate(self):\n        frappe.enqueue("my_app.jobs.sync", queue="long")\n' }],
+      id: 'FR-080', shouldHave: false,
+    },
+    {
+      name: 'FR-081 (a) async: true does not fire',
+      files: [{ path: 'sales_order.js', content: 'frappe.call({\n    method: "my_app.api.get_rate",\n    async: true,\n    callback(r) { frm.set_value("rate", r.message); }\n});\n' }],
+      id: 'FR-081', shouldHave: false,
+    },
+    {
+      name: 'FR-081 (b) async: false on a later line of a multi-line call fires',
+      files: [{ path: 'sales_order.js', content: 'frappe.call({\n    method: "my_app.api.get_rate",\n    args: { name: frm.doc.name },\n    async: false,\n    callback(r) { frm.set_value("rate", r.message); }\n});\n' }],
+      id: 'FR-081', shouldHave: true,
+    },
+    {
+      name: 'FR-082 (a) log message that only mentions a password as text does not fire',
+      files: [{ path: 'api.py', content: 'logger.info("password changed successfully")\n' }],
+      id: 'FR-082', shouldHave: false,
+    },
+    {
+      name: 'FR-082 (b) logging only whether a secret is set (bool) does not fire',
+      files: [{ path: 'api.py', content: 'logger.debug(f"api key set: {bool(api_key)}")\n' }],
+      id: 'FR-082', shouldHave: false,
+    },
+    {
+      name: 'FR-082 (c) f-string interpolation of a token fires',
+      files: [{ path: 'api.py', content: 'logger.info(f"using token {token}")\n' }],
+      id: 'FR-082', shouldHave: true,
+    },
+    {
+      name: 'FR-082 (d) frappe.log_error with a secret variable fires',
+      files: [{ path: 'api.py', content: 'frappe.log_error(api_secret)\n' }],
+      id: 'FR-082', shouldHave: true,
+    },
+    {
+      name: 'FR-082 (e) logger.info with an ordinary variable does not fire',
+      files: [{ path: 'api.py', content: 'logger.info(f"order {order_name} created")\n' }],
+      id: 'FR-082', shouldHave: false,
+    },
+  ];
+  for (const t of regression6) {
     const result = checkFiles(t.files, rulesData);
     const ok = has(result, t.id) === t.shouldHave;
     if (ok) { passed++; console.log(`PASS ${t.name}`); }
