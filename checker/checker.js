@@ -53,6 +53,59 @@ export const RULES = [
 const OTHER_APP_RE = /(^|\/)apps\/(frappe|erpnext|hrms|crm|helpdesk)\//;
 const DB_CALL_RE = /frappe\.(db\.get_value|db\.sql|get_doc|get_all|get_list)\s*\(/;
 const WRITE_CALL_RE = /\.(insert|save|submit|delete|set_value)\s*\(/;
+// A permission check, in any of the forms the skills accept.
+const PERM_CHECK_RE = /has_permission|check_permission|only_has_(?:select|write|perm)|get_list\s*\(/;
+// Names that look like function calls but are not helper calls: keywords,
+// builtins, and Frappe API names (attribute calls are excluded by the
+// regex itself, since they are preceded by a dot).
+const SKIP_CALLS = new Set([
+  'if', 'elif', 'else', 'for', 'while', 'return', 'def', 'class', 'import',
+  'print', 'len', 'str', 'int', 'float', 'bool', 'list', 'dict', 'set',
+  'tuple', 'sorted', 'min', 'max', 'sum', 'abs', 'round', 'range',
+  'enumerate', 'zip', 'isinstance', 'type', 'super', 'getattr', 'setattr',
+  'hasattr', 'open', 'ValueError', 'Exception', 'PermissionError',
+]);
+
+// Names of functions a body calls (bare `name(` and `self.name(`).
+function calledFunctionNames(bodyText) {
+  const names = new Set();
+  const bareRe = /(?:^|[^\w.])([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
+  let m;
+  while ((m = bareRe.exec(bodyText)) !== null) {
+    if (!SKIP_CALLS.has(m[1])) names.add(m[1]);
+  }
+  const selfRe = /\bself\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
+  while ((m = selfRe.exec(bodyText)) !== null) {
+    if (!SKIP_CALLS.has(m[1])) names.add(m[1]);
+  }
+  return names;
+}
+
+// Does a permission check happen in a helper the body calls, directly or
+// transitively (up to 4 levels)? `fnIndex` maps a function name to its
+// definitions across the whole submission; `aliasMaps` maps a file path to
+// its `from ... import X as Y` aliases. A helper in a file that was not
+// submitted cannot be followed, so that case still flags.
+function calleeChecksPermission(startBody, startFile, fnIndex, aliasMaps) {
+  const visited = new Set();
+  const queue = [{ body: startBody, file: startFile, depth: 0 }];
+  while (queue.length) {
+    const { body, file, depth } = queue.shift();
+    if (depth >= 4) continue;
+    for (const called of calledFunctionNames(body)) {
+      const aliases = aliasMaps.get(file) || new Map();
+      const real = aliases.get(called) || called;
+      if (visited.has(real)) continue;
+      visited.add(real);
+      const defs = fnIndex.get(real) || fnIndex.get(called) || [];
+      for (const def of defs) {
+        if (PERM_CHECK_RE.test(def.bodyText)) return true;
+        queue.push({ body: def.bodyText, file: def.file, depth: depth + 1 });
+      }
+    }
+  }
+  return false;
+}
 
 function linesOf(content) {
   return String(content || '').split('\n');
@@ -161,10 +214,13 @@ export function checkFiles(files, rulesInput) {
   function add(ruleId, file, lineIdx, snippetOverride) {
     const rule = meta.get(ruleId);
     if (!rule) return;
+    const lines = linesOf(input.find((f) => f.path === file)?.content || '');
+    // A "# noqa" comment on the flagged line suppresses the finding, for
+    // every rule. The author has deliberately marked that line as reviewed.
+    if (/#\s*noqa\b/.test(lines[lineIdx] || '')) return;
     const key = ruleId + '|' + file + '|' + (lineIdx + 1);
     if (seen.has(key)) return;
     seen.add(key);
-    const lines = linesOf(input.find((f) => f.path === file)?.content || '');
     findings.push({
       ruleId,
       severity: rule.severity,
@@ -180,6 +236,32 @@ export function checkFiles(files, rulesInput) {
   const isPy = (p) => /\.py$/i.test(p);
   const isJs = (p) => /\.js$/i.test(p);
   const isTemplate = (p) => /\.(html|jinja|j2)$/i.test(p) || /\.html\./i.test(p);
+
+  // --- Cross-file Python function index (for FR-023 delegation) -------
+  // name -> [{ bodyText, file }] for every def in the submission, plus a
+  // per-file alias map from `from ... import X as Y` / `from ... import X`.
+  const pyFnIndex = new Map();
+  const pyAlias = new Map();
+  for (const f of input) {
+    if (!isPy(f.path)) continue;
+    const fns = parsePyFunctions(linesOf(f.content || ''));
+    for (const fn of fns) {
+      const bodyText = fn.bodyLines.map((b) => b.text).join('\n');
+      if (!pyFnIndex.has(fn.name)) pyFnIndex.set(fn.name, []);
+      pyFnIndex.get(fn.name).push({ bodyText, file: f.path });
+    }
+    const aliases = new Map();
+    for (const line of linesOf(f.content || '')) {
+      const im = /^\s*from\s+[\w.]+\s+import\s+(.+)$/.exec(line);
+      if (im) {
+        for (const part of im[1].split(',')) {
+          const mm = /^\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?\s*$/.exec(part);
+          if (mm) aliases.set(mm[2] || mm[1], mm[1]);
+        }
+      }
+    }
+    pyAlias.set(f.path, aliases);
+  }
 
   for (const file of input) {
     const path = file.path || '';
@@ -248,7 +330,18 @@ export function checkFiles(files, rulesInput) {
         // (good form is {0} + .format()). _() with {0} must not flag.
         if (/_\s*\(\s*f['"]/.test(line) || /_\s*\(\s*['"][^'"]*\{[A-Za-z_][A-Za-z0-9_]*\}/.test(line)) add('FR-010', path, i);
         if (/^\s*print\s*\(/.test(line)) add('FR-011', path, i);
-        if (/frappe\.get_doc\([^)]*\)\s*\.\w+/.test(line)) add('FR-013', path, i);
+        // FR-013: get_doc(...) followed by a single-field access. Creating
+        // a document is NOT a single-field read: a dict first argument
+        // (creation form) or .insert() / .save() after the call means the
+        // document is being made, not read.
+        {
+          const gm = /frappe\.get_doc\(\s*(\{)?[^)]*\)\s*\.(\w+)/.exec(line);
+          if (gm) {
+            const isCreationForm = !!gm[1];
+            const attr = gm[2];
+            if (!isCreationForm && !/^(insert|save|submit)$/.test(attr)) add('FR-013', path, i);
+          }
+        }
         if (/frappe\.get_(all|list)\s*\([^)]*fields\s*=\s*(?:\[\s*['"]\*['"]\s*\]|['"]\*['"])/.test(line)) add('FR-014', path, i);
         if (isServerScript && /^\s*(import\s+\w+|from\s+[\w.]+\s+import\s+)/.test(line)) add('FR-015', path, i);
         if (/^\s*except\s*:/.test(line)) add('FR-016', path, i);
@@ -278,6 +371,10 @@ export function checkFiles(files, rulesInput) {
         if (/frappe\.get_all\(\s*[^)]*fields\s*=\s*\[\s*['"]name['"]\s*\]/.test(line) && !/pluck\s*=/.test(line)) add('FR-035', path, i);
       }
       // Loop-aware Python checks (FR-030, FR-031) — indentation tracking.
+      // Demo / seed / test files insert demo data in loops by design, so
+      // N+1 and bulk-save rules are not meaningful there. Only FR-030 and
+      // FR-031 are skipped — every other rule still applies.
+      const isDemoSeedTest = /(^|\/)(demo|tests?)\//i.test(path) || path.includes('test_') || /seed/i.test(base);
       {
         const loopStack = []; // { indent }
         for (let i = 0; i < lines.length; i++) {
@@ -286,9 +383,11 @@ export function checkFiles(files, rulesInput) {
           const ind = indentOf(line);
           while (loopStack.length && ind <= loopStack[loopStack.length - 1].indent) loopStack.pop();
           if (/^\s*(for|while)\b.*:\s*$/.test(line)) { loopStack.push({ indent: ind }); continue; }
-          if (loopStack.length) {
+          if (loopStack.length && !isDemoSeedTest) {
             if (DB_CALL_RE.test(line)) add('FR-030', path, i);
-            if (/\.(save|insert)\s*\(/.test(line)) add('FR-031', path, i);
+            // FR-031 fires on .save() / .submit() only. .insert() is bulk
+            // CREATION (demo data, imports), not a bulk update.
+            if (/\.(save|submit)\s*\(/.test(line)) add('FR-031', path, i);
           }
         }
       }
@@ -343,12 +442,17 @@ export function checkFiles(files, rulesInput) {
             // FR-023: no permission check before return/write. A permission
             // check is has_permission, check_permission (call or
             // check_permission= argument), only_has_select/write_perm, or a
-            // permission-aware get_list(). Instance methods of a DocType
-            // controller class (first arg self, inside a class inheriting
-            // from Document) are exempt — the document permission context
-            // already applies — UNLESS the method fetches another document
-            // by a passed-in docname/id with no permission check.
-            const hasPermCheck = /has_permission|check_permission|only_has_(?:select|write|perm)|get_list\s*\(/.test(bodyText);
+            // permission-aware get_list() — in this function OR in a helper
+            // it calls, directly or transitively (same submission). A
+            // function that only reads frappe.get_roles() and performs no
+            // DB read or write is also exempt: it returns view names, and
+            // the endpoints re-check permission. Instance methods of a
+            // DocType controller class (first arg self, inside a class
+            // inheriting from Document) are exempt — the document
+            // permission context already applies — UNLESS the method
+            // fetches another document by a passed-in docname/id with no
+            // permission check (directly or through a helper).
+            const hasPermCheck = PERM_CHECK_RE.test(bodyText);
             if (!hasPermCheck) {
               const firstParam = (fn.params && fn.params[0]) || '';
               const isDocumentSelfMethod = !!fn.isDocumentClass && firstParam === 'self';
@@ -360,8 +464,12 @@ export function checkFiles(files, rulesInput) {
                   riskyFetch = otherParams.some((p) => new RegExp('\\b' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(bodyText));
                 }
               }
+              const rolesOnly = /frappe\.get_roles\s*\(/.test(bodyText)
+                && !/frappe\.(get_doc|get_all|get_list|db\.)/.test(bodyText)
+                && !/\.(insert|save|submit|delete|set_value)\s*\(/.test(bodyText);
+              const delegatedCheck = calleeChecksPermission(bodyText, path, pyFnIndex, pyAlias);
               // A read-only function that only returns a constant is exempt.
-              if ((!isDocumentSelfMethod || riskyFetch) && !/^\s*return\s*\{/.test(bodyText)) add('FR-023', path, fn.line);
+              if ((!isDocumentSelfMethod || riskyFetch) && !rolesOnly && !delegatedCheck && !/^\s*return\s*\{/.test(bodyText)) add('FR-023', path, fn.line);
             }
           }
           if (isWhitelisted && isGuest) {

@@ -143,6 +143,8 @@ td code, .limits code { font-size: 0.88rem; background: #eef1f5; padding: 1px 5p
   word-break: break-word;
 }
 .limits h2 { margin-top: 0; font-size: 1.2rem; }
+#report-box { margin-top: 14px; }
+#report-text { min-height: 220px; }
 .site-footer { border-top: 1px solid var(--border); padding: 18px 0 28px; color: var(--muted); font-size: 0.9rem; }
 .site-footer a { color: var(--accent); }
 @media (max-width: 640px) {

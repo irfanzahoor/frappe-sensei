@@ -104,9 +104,35 @@ any failure.
   functions are never exempt. (Narrowed 2026-11-27: the old version
   flagged controller `self` methods such as `has_unreserved_stock` in
   ERPNext `sales_order.py`.)
+  A permission check in a helper the whitelisted method calls also
+  counts — directly or transitively, up to 4 levels, across files in
+  the same submission, resolving `from ... import X as Y` aliases.
+  A helper in a file that was not submitted cannot be followed, so a
+  thin wrapper whose helper lives elsewhere still flags; check the
+  whole app when a blocker looks wrong. A function that only reads
+  `frappe.get_roles()` and performs no database read or write is also
+  exempt (it returns view names; the endpoints re-check permission).
+  (Narrowed again 2026-11-27: the old version flagged all 8 FMC API
+  wrappers, each of which delegates to a helper that checks
+  permission.)
+- **FR-013 (get_doc for a single field):** creating a document does
+  not fire. A dict first argument (`frappe.get_doc({...})`) or
+  `.insert()` / `.save()` after the call means the document is being
+  made, not read. `frappe.get_doc("Doctype", name).field` still fires.
+- **FR-031 (bulk update doc-by-doc):** fires on `.save()` /
+  `.submit()` inside a loop only. `.insert()` inside a loop is bulk
+  creation (demo data, imports) and does not fire.
+- **FR-030 / FR-031 (demo / seed / test exemption):** neither rule
+  fires in files whose path contains `/demo/`, `/tests/` or `/test_`,
+  or whose filename contains `seed`. Those files insert demo data in
+  loops by design. Every other rule still applies there.
+- **# noqa (all rules):** a `# noqa` comment on the flagged line
+  suppresses the finding, for every rule. The author has deliberately
+  marked that line as reviewed.
 - **FR-030 / FR-031 (loop detection):** loops are tracked by Python
   indentation, not a full AST. Unusual formatting (one-line loops,
-  semicolons) can be missed.
+  semicolons) can be missed. Neither rule fires in demo / seed / test
+  files (see above).
 - **FR-032 (aggregation in Python):** fires only when the iterable
   being summed or counted comes from a database query — a direct
   `frappe.get_all` / `frappe.get_list` / `frappe.db.sql` call inside

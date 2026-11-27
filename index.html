@@ -86,7 +86,16 @@
         </select>
       </label>
       <button id="copy-report" type="button" class="btn secondary">Copy report</button>
+      <button id="show-report" type="button" class="btn secondary">Show report</button>
       <button id="download-report" type="button" class="btn secondary">Download report (.md)</button>
+    </div>
+    <div id="report-box" hidden>
+      <label for="report-text">Report — select all (Ctrl+A) and copy (Ctrl+C)</label>
+      <textarea id="report-text" rows="14" readonly spellcheck="false"></textarea>
+      <div class="row">
+        <button id="select-report" type="button" class="btn secondary">Select all</button>
+        <button id="hide-report" type="button" class="btn secondary">Hide</button>
+      </div>
     </div>
     <div class="table-wrap">
       <table id="findings-table">
@@ -105,6 +114,10 @@
       <li><strong>FR-002</strong> (another app's files edited): a path check only. It fires when a file path contains <code>apps/frappe/</code>, <code>apps/erpnext/</code> and similar — loose pasted snippets with no app path cannot trigger it.</li>
       <li><strong>FR-007</strong> (Custom Field not a fixture): a comment that merely talks about custom fields can false-positive. The <code>fixtures/</code> path is the signal, not the code.</li>
       <li><strong>FR-018</strong> (validation only in JS): a heuristic. A JS <code>validate</code> handler is flagged unless a <code>.py</code> file in the same check defines <code>validate</code> / <code>before_submit</code> / <code>before_insert</code>.</li>
+      <li><strong>FR-023</strong> (permission check): a helper the whitelisted method calls is followed — if that helper checks permission (directly or through another helper), the endpoint is not flagged. A helper in a file that was not submitted cannot be followed, so check the whole app when a blocker looks wrong. A function that only reads <code>frappe.get_roles()</code> and performs no database read or write is also exempt.</li>
+      <li><strong>FR-013 / FR-031</strong>: creating a document is not reading or updating one. <code>frappe.get_doc({...}).insert()</code> does not fire FR-013, and <code>.insert()</code> inside a loop does not fire FR-031 — only <code>.save()</code> / <code>.submit()</code> do.</li>
+      <li><strong>FR-030 / FR-031</strong> do not fire in demo, seed or test files (<code>demo/</code>, <code>tests/</code>, <code>test_</code>, or a filename containing <code>seed</code>), where loops insert demo data by design. Other rules still apply there.</li>
+      <li><strong># noqa</strong>: a <code># noqa</code> comment on the flagged line suppresses the finding, for every rule.</li>
       <li><strong>FR-030 / FR-031</strong> (loop detection): loops are tracked by Python indentation, not a full parser. Unusual formatting can be missed.</li>
       <li>ZIP upload is not in this version — upload several files instead. AI fix suggestions, private repos and logins are out of scope for the MVP.</li>
     </ul>

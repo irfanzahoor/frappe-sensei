@@ -162,6 +162,108 @@ for (const rule of rulesData.rules) {
   }
 }
 
+// Regression tests for the FMC false positives (2026-11-27): FR-023
+// delegation, FR-013/FR-031 insert, seed exemption, noqa suppression.
+{
+  const regression2 = [
+    {
+      name: 'FR-023 (c) whitelisted fn calling a same-file helper that checks permission does not fire',
+      files: [{ path: 'api/costing.py', content: 'import frappe\nfrom food_manufacturing.costing.simulator import simulate as _simulate\n\n@frappe.whitelist()\ndef simulate_recipe_cost(bom: str) -> dict:\n    return _simulate(bom)\n' },
+        { path: 'costing/simulator.py', content: 'import frappe\n\ndef simulate(bom: str) -> dict:\n    doc = _readable_bom(bom)\n    return {"bom": doc.name}\n\ndef _readable_bom(bom: str):\n    frappe.has_permission("BOM", "read", doc=bom, throw=True)\n    doc = frappe.get_doc("BOM", bom)\n    doc.check_permission("read")\n    return doc\n' }],
+      id: 'FR-023', shouldHave: false,
+    },
+    {
+      name: 'FR-023 (c2) whitelisted fn calling a helper with NO check still fires',
+      files: [{ path: 'api/costing.py', content: 'import frappe\n\n@frappe.whitelist()\ndef get_total(name):\n    return _calc(name)\n\ndef _calc(name):\n    return frappe.get_doc("Sales Order", name).grand_total\n' }],
+      id: 'FR-023', shouldHave: true,
+    },
+    {
+      name: 'FR-023 (c3) whitelisted fn calling a cross-file helper that checks permission does not fire',
+      files: [{ path: 'api/quality.py', content: 'import frappe\n\n@frappe.whitelist()\ndef get_inspection_readings(inspection: str) -> list:\n    from food_manufacturing.quality.inspection import get_readings\n    return get_readings(inspection)\n' },
+        { path: 'quality/inspection.py', content: 'import frappe\n\ndef get_readings(inspection: str) -> list:\n    frappe.has_permission("Quality Inspection", "read", doc=inspection, throw=True)\n    doc = frappe.get_doc("Quality Inspection", inspection)\n    doc.check_permission("read")\n    return doc.readings\n' }],
+      id: 'FR-023', shouldHave: false,
+    },
+    {
+      name: 'FR-023 (c4) roles-only whitelisted fn (get_roles, no DB read/write) does not fire',
+      files: [{ path: 'api/dashboards.py', content: 'import frappe\n\n@frappe.whitelist()\ndef available_views() -> list:\n    roles = set(frappe.get_roles())\n    if "System Manager" in roles:\n        return list(DASHBOARDS)\n    return [view for view in DASHBOARDS if roles.intersection(ROLE_FOR[view])] or ["production"]\n' }],
+      id: 'FR-023', shouldHave: false,
+    },
+    {
+      name: 'FR-023 (c5) roles-only fn that ALSO reads the DB still fires',
+      files: [{ path: 'api/dashboards.py', content: 'import frappe\n\n@frappe.whitelist()\ndef get_views(company: str) -> list:\n    roles = set(frappe.get_roles())\n    doc = frappe.get_doc("Company", company)\n    return [doc.name] if "System Manager" in roles else []\n' }],
+      id: 'FR-023', shouldHave: true,
+    },
+    {
+      name: 'FR-013 (a) get_doc dict form followed by .insert() does not fire (creation, not a read)',
+      files: [{ path: 'demo/seed.py', content: 'doc = frappe.get_doc({"doctype": "Batch", "batch_id": batch_id, "item": item_code}).insert()\n' }],
+      id: 'FR-013', shouldHave: false,
+    },
+    {
+      name: 'FR-013 (b) get_doc("Doctype", name).field still fires',
+      files: [{ path: 'sales_order.py', content: "group = frappe.get_doc('Item', row.item_code).item_group\n" }],
+      id: 'FR-013', shouldHave: true,
+    },
+    {
+      name: 'FR-031 (a) .insert() inside a loop does not fire (bulk creation, not update)',
+      files: [{ path: 'demo/importer.py', content: 'for name in names:\n    doc = frappe.get_doc({"doctype": "Item", "item_code": name})\n    doc.insert()\n' }],
+      id: 'FR-031', shouldHave: false,
+    },
+    {
+      name: 'FR-031 (b) .submit() inside a loop still fires',
+      files: [{ path: 'sales_order.py', content: 'for name in names:\n    doc = frappe.get_doc("Sales Order", name)\n    doc.submit()\n' }],
+      id: 'FR-031', shouldHave: true,
+    },
+    {
+      name: 'FR-030/031 (a) DB call and .save() in a loop inside demo/seed.py do not fire',
+      files: [{ path: 'food_manufacturing/demo/seed.py', content: 'for row in rows:\n    doc = frappe.get_doc("Batch", row.batch)\n    doc.status = "Active"\n    doc.save()\n' }],
+      id: 'FR-030', shouldHave: false,
+    },
+    {
+      name: 'FR-030/031 (b) same loop in a normal file still fires FR-030',
+      files: [{ path: 'food_manufacturing/stock.py', content: 'for row in rows:\n    doc = frappe.get_doc("Batch", row.batch)\n    doc.status = "Active"\n    doc.save()\n' }],
+      id: 'FR-030', shouldHave: true,
+    },
+    {
+      name: 'FR-023 still fires in a seed file (only FR-030/FR-031 are exempt there)',
+      files: [{ path: 'food_manufacturing/demo/seed.py', content: '@frappe.whitelist()\ndef get_total(name):\n    return frappe.get_doc("Sales Order", name).grand_total\n' }],
+      id: 'FR-023', shouldHave: true,
+    },
+    {
+      name: 'noqa (a) print() with a # noqa comment on the same line does not fire FR-011',
+      files: [{ path: 'demo/seed.py', content: 'print(message)  # noqa: T201 - this is a CLI seeding tool\n' }],
+      id: 'FR-011', shouldHave: false,
+    },
+    {
+      name: 'noqa (b) raise Exception with a # noqa comment does not fire FR-008',
+      files: [{ path: 'sales_order.py', content: "raise Exception('x')  # noqa: B902 - re-raised as framework error\n" }],
+      id: 'FR-008', shouldHave: false,
+    },
+  ];
+  for (const t of regression2) {
+    const result = checkFiles(t.files, rulesData);
+    const ok = has(result, t.id) === t.shouldHave;
+    if (ok) { passed++; console.log(`PASS ${t.name}`); }
+    else {
+      failed++;
+      failures.push(`${t.name}: expected ${t.id} ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
+      console.log(`FAIL ${t.name}: expected ${t.id} ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
+    }
+  }
+  // FR-031 seed-exemption companion: the same demo/seed.py loop must not
+  // produce FR-031 either (checked above for FR-030 only, same file set).
+  {
+    const seedLoop = [{ path: 'food_manufacturing/demo/seed.py', content: 'for row in rows:\n    doc = frappe.get_doc("Batch", row.batch)\n    doc.status = "Active"\n    doc.save()\n' }];
+    const result = checkFiles(seedLoop, rulesData);
+    const ok = !has(result, 'FR-031');
+    if (ok) { passed++; console.log('PASS FR-030/031 (a2) .save() in a loop inside demo/seed.py does not fire FR-031'); }
+    else {
+      failed++;
+      failures.push('FR-031 seed exemption: demo/seed.py loop still produced FR-031');
+      console.log('FAIL FR-031 seed exemption: demo/seed.py loop still produced FR-031');
+    }
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed, ${rulesData.rules.length} rules.`);
 if (failed) {
   console.log('Failures:');

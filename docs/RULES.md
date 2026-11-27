@@ -66,6 +66,43 @@ Severity, title and fix text are unchanged for both rules.
   earlier in the same file. Sums over `self.get(...)`, `self.items` or
   a plain list no longer fire.
 
+
+## Rule changes — Copy button + FMC false positives (2026-11-27)
+
+A real run on FMC (`irfanzahoor/fmc`, version-16) produced 50 findings
+(8 blocker, 41 major, 1 minor). Every one of the 8 FR-023 blockers was
+a thin API wrapper delegating to a helper that checks permission, and
+the seed-file findings were demo data by design. The rules were
+narrowed, not weakened — a standalone whitelisted function with no
+check anywhere in its call chain still fires:
+
+- **FR-023:** a permission check in a helper the whitelisted method
+  calls now counts, directly or transitively (up to 4 levels, across
+  files in the same submission, resolving `from ... import X as Y`
+  aliases). A helper in a file that was not submitted cannot be
+  followed. A function that only reads `frappe.get_roles()` and
+  performs no database read or write is also exempt. After the fix the
+  FMC run drops from 50 findings to 4 on the 6 submitted files (the 4
+  whose helpers live in files outside that submission), and to 0 when
+  the helper files are included.
+- **FR-013:** creating a document no longer fires. A dict first
+  argument (`frappe.get_doc({...})`) or `.insert()` / `.save()` after
+  the call means the document is being made, not read.
+- **FR-031:** fires on `.save()` / `.submit()` inside a loop only.
+  `.insert()` inside a loop is bulk creation and no longer fires.
+- **FR-030 / FR-031:** neither fires in demo, seed or test files
+  (paths containing `/demo/`, `/tests/` or `/test_`, or a filename
+  containing `seed`). Other rules still apply there.
+- **All rules:** a `# noqa` comment on the flagged line suppresses the
+  finding.
+
+The Copy button in the web UI also changed the same day: it now tries
+`navigator.clipboard.writeText`, then a hidden textarea with
+`document.execCommand('copy')`, and if both fail it shows the report in
+a visible, selectable textarea with a Select-all button. "Copied" is
+shown only when a copy actually succeeded. A "Show report" button
+reveals the markdown report at any time.
+
 ## Out of scope for Phase 1
 
 These were read in the v2.3.0 skills but are **not** in these 35 rules, because they are not deterministic static code checks:

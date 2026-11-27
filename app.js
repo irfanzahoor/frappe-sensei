@@ -234,6 +234,8 @@ $('clear-btn').addEventListener('click', () => {
   lastResult = null;
   lastFiles = [];
   $('results').hidden = true;
+  $('report-box').hidden = true;
+  $('copy-report').textContent = 'Copy report';
   showError('');
 });
 
@@ -280,15 +282,70 @@ function reportMarkdown() {
   lines.push('', 'Rules from frappe_core_skills v2.3.0 — 35 checks.');
   return lines.join('\n');
 }
-$('copy-report').addEventListener('click', async () => {
+// --- Report export --------------------------------------------------------
+// Copy tries three steps in order and reports truthfully:
+// 1. navigator.clipboard.writeText (needs a secure context + permission),
+// 2. a hidden textarea + document.execCommand('copy') (works on http and
+//    older browsers), 3. if both fail, the report is shown in a visible,
+//    selectable textarea so the user can copy it by hand. "Copied" is
+//    shown only when a copy actually succeeded.
+async function copyTextToClipboard(text) {
   try {
-    await navigator.clipboard.writeText(reportMarkdown());
-    $('copy-report').textContent = 'Copied';
-    setTimeout(() => { $('copy-report').textContent = 'Copy report'; }, 2000);
-  } catch (e) {
-    showError('Copy failed — select the report text manually instead.');
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) { /* fall through to the next method */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (ok) return true;
+  } catch (e) { /* fall through to the manual box */ }
+  return false;
+}
+function showReportBox() {
+  $('report-text').value = reportMarkdown();
+  $('report-box').hidden = false;
+  return $('report-box');
+}
+$('copy-report').addEventListener('click', async () => {
+  const btn = $('copy-report');
+  const ok = await copyTextToClipboard(reportMarkdown());
+  if (ok) {
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = 'Copy report'; }, 2000);
+  } else {
+    btn.textContent = 'Copy failed — use the text box below';
+    showReportBox();
+    const ta = $('report-text');
+    ta.focus();
+    ta.select();
+    setTimeout(() => { btn.textContent = 'Copy report'; }, 4000);
   }
 });
+$('show-report').addEventListener('click', () => {
+  showReportBox();
+  const ta = $('report-text');
+  ta.focus();
+  ta.select();
+  $('report-box').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+$('select-report').addEventListener('click', () => {
+  const ta = $('report-text');
+  ta.focus();
+  ta.select();
+  $('select-report').textContent = 'Selected — press Ctrl+C';
+  setTimeout(() => { $('select-report').textContent = 'Select all'; }, 2000);
+});
+$('hide-report').addEventListener('click', () => { $('report-box').hidden = true; });
 $('download-report').addEventListener('click', () => {
   const blob = new Blob([reportMarkdown()], { type: 'text/markdown' });
   const link = document.createElement('a');
