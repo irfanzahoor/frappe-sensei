@@ -1,7 +1,7 @@
 # Frappe Sensei — Checker Engine
 
-The checker implements all 43 rules in `../rules/rules.json` (FR-001 to
-FR-043) as a pure, dependency-free ES module. It reads code only — it never
+The checker implements all 59 rules in `../rules/rules.json` (FR-001 to
+FR-059) as a pure, dependency-free ES module. It reads code only — it never
 runs it, sends it anywhere, or stores it.
 
 ## Files
@@ -56,7 +56,9 @@ good example (must not produce that ruleId), using the `example_bad` /
 `example_good` snippets from `rules/rules.json`. Cross-file rules use
 constructed file sets: FR-018 pairs a `.js` file with/without a `.py`
 controller, FR-019 pairs a JS `frm.call` with a whitelisted /
-unwhitelisted Python method, FR-002/FR-007/FR-015 use the file path to
+unwhitelisted Python method, FR-056 pairs a `hooks.py` /
+`patches.txt` with the module files its dotted paths name,
+FR-002/FR-007/FR-015 use the file path to
 fire. The runner also checks the verdict rule and exits non-zero on
 any failure.
 
@@ -171,6 +173,76 @@ any failure.
   itself, inside a `def` named `has_permission` or
   `permission_query_conditions`. A hook function defined in a separate
   permissions module is not seen — that is a known gap.
+  - **FR-040 corrected (2026-11-27):** the old rule was inverted — it
+    flagged any `return True` inside a `has_permission` hook. The
+    framework authors say the opposite (frappe/skills
+    `skills/frappe-app-dev/SKILL.md` line 84 and deep-app-audit
+    A28): a hook must return `True` for users it does not restrict,
+    because Frappe treats a missing return (`None`) as a denial. The
+    rule now flags a hook that can fall through to `None`: no
+    `return True` anywhere in the function, a bare `return`, or a
+    last top-level statement that is not a `return` (a return nested
+    inside an `if` does not end the function). An `if`/`else` chain
+    where every branch ends in a `return` is safe and does not fire.
+    `permission_query_conditions` is not checked by FR-040.
+- **FR-044 (shell injection):** string literals are stripped before
+  checking, so a message mentioning `os.system()` does not fire.
+  `subprocess.run([...])` with a list of arguments and `shell=False`
+  does not fire.
+- **FR-045 (unsafe deserialization):** `yaml.load` with
+  `Loader=yaml.SafeLoader` (or `safe_load`) does not fire.
+- **FR-046 (SSTI):** a literal string first argument to
+  `render_template` / `Template` is safe and does not fire. A
+  variable, attribute, call or f-string as the first argument fires.
+- **FR-047 (delete / truncate without a filter):** a comment on the
+  same line or the line above (a deliberate full-table clear, e.g.
+  log rotation) exempts the call, like FR-025. A variable filter
+  fires — the checker cannot tell whether it is empty at runtime.
+- **FR-048 (DDL in app code):** exempt inside a patch file (a path
+  containing `/patches/`) or inside `on_doctype_update`.
+- **FR-049 (ledger writes):** reads (`get_value`, `get_all`,
+  `get_list`) on a ledger doctype do not fire; only writes do.
+- **FR-050 (monkey-patching):** exempt in test files (a path
+  containing `/test` or ending in `_test.py`) and inside
+  `unittest.mock.patch` blocks. Assignments to `frappe.local`,
+  `frappe.flags` and `frappe.conf` are not patching and do not fire.
+- **FR-051 (enqueue without `enqueue_after_commit`):** fires only
+  inside a lifecycle method of a controller class or a whitelisted
+  method. An `enqueue` in an ordinary helper does not fire.
+- **FR-052 (`get_query` without `ignore_permissions=False`):**
+  string literals are stripped before checking, so a message
+  mentioning `get_query` does not fire.
+- **FR-053 (misspelled lifecycle name):** fires on a wrong name
+  (from B33's list of 24) or a near-miss (edit distance ≤ 2 from a
+  real lifecycle name) in a controller class, and on a bad
+  `doc_events` key in `hooks.py`. Ordinary helper methods do not
+  fire. A near-miss check can theoretically flag a deliberately
+  named helper (e.g. a method called `on_save` on purpose) — that
+  is a false positive by design of the distance rule; rename it.
+- **FR-054 (request state in a lifecycle method):** `form_dict`
+  inside a whitelisted method does not fire — that is the normal
+  pattern. `form_dict` inside a non-whitelisted helper fires.
+- **FR-055 (return in `before_install`):** a bare `return` is safe
+  and does not fire. A `return <value>` with a comment on the same
+  line (an intentional refusal with a stated reason) is exempt.
+- **FR-056 (dotted path does not resolve):** needs the whole
+  submission's file list. A lone `hooks.py` with no other `.py`
+  files is skipped — a single-file paste cannot resolve dotted
+  paths. Paths starting with `frappe.`, `erpnext.` or `hrms.` are
+  skipped (other apps, not submitted). The JS twin (A38, `frappe.call`
+  targets) is not implemented — `frappe.call` targets are usually
+  whitelisted method paths, not module functions, so resolving them
+  the same way would flag valid code.
+- **FR-057 (module-level state in `hooks.py`):** fires only on lines
+  outside any `def` in `hooks.py`. The same call inside a function
+  does not fire.
+- **FR-058 (raw-SQL write without a cache clear):** `set_value` /
+  `save` clear the cache themselves, so they never reach this check.
+  A `SELECT` does not fire. The cache clear must be in the same
+  function as the write.
+- **FR-059 (`set_user` without restoration):** a `finally` block
+  restores the user only if it contains another `set_user(` call.
+  A `try`/`except` with no `finally` still fires.
 - **FR-041 (`cur_frm`):** string literals are stripped before
   checking, and `//` comment lines are skipped, so a message or a
   comment mentioning `cur_frm` does not fire.

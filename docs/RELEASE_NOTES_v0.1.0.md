@@ -41,6 +41,59 @@ only, written in our own wording). Full list: [`docs/RULES.md`](RULES.md).
 - None of the 8 fires on ERPNext `sales_order.py` (still 8 findings) or
   on the 6 FMC files (still 4, the known FR-023 cross-file delegates).
 
+### Added after v0.1.0 — FR-040 corrected + 16 rules from the official frappe/skills review (2026-11-27)
+
+- **FR-040 corrected (major):** the Impertio round above got this rule
+  backwards — it flagged any `return True` in a `has_permission`
+  hook. The framework authors say the opposite (frappe/skills
+  `skills/frappe-app-dev/SKILL.md` line 84 and deep-app-audit A28):
+  a hook must return `True` for users it does not restrict, because
+  Frappe treats a missing return (`None`) as a denial. FR-040 now
+  flags a hook that can fall through to `None`. FR-039's good example
+  was fixed in the same round (it used to end with `return None`).
+- **FR-044 (blocker):** shell injection — `os.system` / `os.popen` /
+  `subprocess` with `shell=True` / `execute_in_shell`.
+- **FR-045 (major):** unsafe deserialization — `pickle` / `yaml.load`
+  without `SafeLoader` / `marshal` / `dill` / `shelve`.
+- **FR-046 (blocker):** SSTI — `render_template` / `Template` with a
+  non-literal first argument.
+- **FR-047 (blocker):** delete / truncate with no filter (whole table
+  cleared), with a comment exemption for deliberate clears.
+- **FR-048 (major):** DDL in app code (`sql_ddl` / `ALTER` / `CREATE` /
+  `DROP` / `add_index` / `truncate`), exempt in patches and
+  `on_doctype_update`.
+- **FR-049 (blocker):** direct write to a ledger doctype (GL Entry,
+  Stock Ledger Entry, Payment Ledger Entry, Bin, Serial and Batch
+  Bundle). Reads are fine.
+- **FR-050 (blocker):** monkey-patching `frappe` / `erpnext` / `hrms`,
+  exempt in tests and `unittest.mock.patch` blocks.
+- **FR-051 (major):** `frappe.enqueue()` in a lifecycle or whitelisted
+  method without `enqueue_after_commit=True`.
+- **FR-052 (major):** `frappe.qb.get_query()` without
+  `ignore_permissions=False`.
+- **FR-053 (major):** misspelled lifecycle method name, or a bad
+  `doc_events` key in `hooks.py`.
+- **FR-054 (major):** request state read inside a lifecycle method.
+- **FR-055 (major):** `return <value>` inside `before_install`.
+- **FR-056 (major):** dotted path in `hooks.py` / `patches.txt` that
+  does not resolve against the submitted files (single-file paste
+  cannot resolve — skipped there).
+- **FR-057 (major):** database or site state read at module level in
+  `hooks.py`.
+- **FR-058 (major):** raw-SQL write without clearing the document
+  cache in the same function.
+- **FR-059 (major):** `frappe.set_user()` without restoration in a
+  `finally`, or `frappe.session.user` assignment.
+- None of the 16 new rules fires on ERPNext `sales_order.py` (still 8
+  findings) or on the 6 FMC files (still 4, the known FR-023
+  cross-file delegates). Tests: 147 passed, 0 failed (59 rules
+  bad+good, 3 verdict, 38 earlier regression, 44 new regression).
+- **Live site note:** the live site at
+  https://irfanzahoor.github.io/frappe-sensei/ still serves the
+  v0.1.0 build (Pages has not rebuilt since 0f17cf5 — API pushes do
+  not trigger Pages builds). The 59 checks show there only after the
+  next Pages build, triggered by a real file-change push.
+
 ## What changed since the first build
 
 ### Fix round 1 — FR-023 and FR-032 narrowed (2026-11-27)

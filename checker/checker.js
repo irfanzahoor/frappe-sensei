@@ -51,11 +51,27 @@ export const RULES = [
   { id: 'FR-036', severity: 'blocker', category: 'apis', title: 'self.save() inside validate / before_save / on_update', fix: 'Never call .save() from validate, before_save or on_update; use self.db_set() for a single field, or move the work to after_save or a background job.' },
   { id: 'FR-037', severity: 'major', category: 'apis', title: 'Field assigned in on_update is never saved', fix: 'Set the field in validate or before_save, or use self.db_set() in on_update.' },
   { id: 'FR-038', severity: 'major', category: 'apis', title: 'Overridden validate() without super().validate()', fix: 'Call super().validate() first in every overridden validate().' },
-  { id: 'FR-039', severity: 'blocker', category: 'security', title: 'frappe.throw() or raise inside a permission hook', fix: 'Never throw or raise in a permission hook; return False to deny and None to defer to the standard permission system.' },
-  { id: 'FR-040', severity: 'major', category: 'security', title: 'return True inside a has_permission hook', fix: 'Return None to let the standard permission system decide, and False to deny; never return True.' },
+  { id: 'FR-039', severity: 'blocker', category: 'security', title: 'frappe.throw() or raise inside a permission hook', fix: 'Never throw or raise in a permission hook; return False to deny and True for users the hook does not restrict.' },
+  { id: 'FR-040', severity: 'major', category: 'security', title: 'has_permission hook that can fall through to None', fix: 'End every has_permission hook with an explicit return True for users the hook does not restrict; return False only to deny.' },
   { id: 'FR-041', severity: 'minor', category: 'apis', title: 'cur_frm used in client script', fix: 'Use the frm parameter passed to every form event handler instead of cur_frm.' },
   { id: 'FR-042', severity: 'major', category: 'security', title: 'eval() or exec() in Python code', fix: 'Parse data with frappe.parse_json or json.loads instead of eval/exec; legitimate uses in Frappe apps are near-zero.' },
   { id: 'FR-043', severity: 'minor', category: 'performance', title: 'frappe.enqueue() without queue=', fix: "Always pass queue= explicitly — 'short', 'default' or 'long' — to frappe.enqueue()." },
+  { id: 'FR-044', severity: 'blocker', category: 'security', title: 'Shell command built from app code (os.system / subprocess shell=True)', fix: 'Use subprocess.run with a list of arguments and shell=False, or a framework API; never build a shell string from user or document data.' },
+  { id: 'FR-045', severity: 'major', category: 'security', title: 'Unsafe deserialization (pickle / yaml.load / marshal / dill / shelve)', fix: 'Use json.loads / frappe.parse_json for data, or yaml.load with Loader=yaml.SafeLoader. Never unpickle data you did not create yourself.' },
+  { id: 'FR-046', severity: 'blocker', category: 'security', title: 'Server-side template injection (render_template with a non-literal template)', fix: 'Pass a literal template path or string to render_template; render user-controlled content as data with |e, never as the template itself.' },
+  { id: 'FR-047', severity: 'blocker', category: 'apis', title: 'Delete or truncate with no filter (whole table cleared)', fix: 'Always pass a concrete filter to frappe.db.delete, and a WHERE clause to raw DELETE; use truncate only as a deliberate, commented full-table clear.' },
+  { id: 'FR-048', severity: 'major', category: 'apis', title: 'DDL in app code (sql_ddl / ALTER / CREATE / DROP / add_index / truncate)', fix: 'Move schema changes into a patch (patches.txt + an execute() function) or into on_doctype_update; never run DDL from a whitelisted method or a lifecycle hook.' },
+  { id: 'FR-049', severity: 'blocker', category: 'apis', title: 'Direct write to a ledger doctype (GL Entry / Stock Ledger / Bin / ...)', fix: 'Never write ledger rows directly. Post, cancel or amend through the source document (Sales Invoice, Stock Entry, Payment Entry) and let the framework write the ledger.' },
+  { id: 'FR-050', severity: 'blocker', category: 'apis', title: 'Monkey-patching frappe / erpnext / hrms at import time', fix: 'Do not assign attributes on frappe, erpnext or hrms. Use a hook, an override module, or a wrapper function in your own app instead.' },
+  { id: 'FR-051', severity: 'major', category: 'apis', title: 'frappe.enqueue() in a lifecycle or whitelisted method without enqueue_after_commit=True', fix: 'Pass enqueue_after_commit=True to every frappe.enqueue() / enqueue_doc() called from a lifecycle method or a whitelisted method.' },
+  { id: 'FR-052', severity: 'major', category: 'security', title: 'frappe.qb.get_query() without ignore_permissions=False', fix: 'Pass ignore_permissions=False to frappe.qb.get_query in user-facing code, or use frappe.get_list, which applies permissions.' },
+  { id: 'FR-053', severity: 'major', category: 'apis', title: 'Misspelled lifecycle method name (after_save / before_delete / on_saved ...)', fix: 'Rename the method to a lifecycle name the framework calls (on_update, on_submit, before_insert, after_insert, on_trash, after_delete, on_cancel, on_change, autoname, onload, ...), or rename it to a plain helper name and call it from a lifecycle method. The same applies to doc_events keys in hooks.py.' },
+  { id: 'FR-054', severity: 'major', category: 'apis', title: 'Request state read inside a lifecycle method (frappe.local.request / form_dict)', fix: 'Read request data only in whitelisted methods and pass it in as an argument; lifecycle methods must work from the document alone.' },
+  { id: 'FR-055', severity: 'major', category: 'apis', title: 'return with a value inside before_install', fix: 'Never return a value from before_install; raise with frappe.throw if the install must stop, or return nothing at all.' },
+  { id: 'FR-056', severity: 'major', category: 'placement', title: 'Dotted path in hooks.py / patches.txt does not resolve', fix: 'Fix the dotted path to a module and function that exist in the app, or submit the whole app so the checker can resolve it.' },
+  { id: 'FR-057', severity: 'major', category: 'placement', title: 'Database or site state read at module level in hooks.py', fix: 'Keep hooks.py to static data only. Move per-site conditions into the handler body, or into a before_enable hook.' },
+  { id: 'FR-058', severity: 'major', category: 'performance', title: 'Raw-SQL write without clearing the document cache', fix: 'Call frappe.clear_document_cache(doctype, name) — or frappe.clear_cache(doctype=...) — in the same function after a raw SQL write.' },
+  { id: 'FR-059', severity: 'major', category: 'security', title: 'frappe.set_user() without restoration, or frappe.session.user assignment', fix: 'Restore the original user in a finally block after every set_user, or use frappe.only_for / a permission check instead of switching users.' },
 ];
 
 const OTHER_APP_RE = /(^|\/)apps\/(frappe|erpnext|hrms|crm|helpdesk)\//;
@@ -128,6 +144,68 @@ function isCommentPy(line) {
 function stripStrings(s) {
   // Remove single/double-quoted string literals (best effort, single line).
   return s.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''");
+}
+
+// Join a call starting at lines[i] from column startCol, following
+// continuation lines until the parens balance (up to 10 lines).
+// Returns { text, endIndex }.
+function joinCallText(lines, i, startCol) {
+  let text = lines[i].slice(startCol);
+  let depth = (text.match(/\(/g) || []).length - (text.match(/\)/g) || []).length;
+  let k = i;
+  while (depth > 0 && k + 1 < lines.length && k - i < 10) {
+    k++;
+    text += '\n' + lines[k];
+    depth += (lines[k].match(/\(/g) || []).length - (lines[k].match(/\)/g) || []).length;
+  }
+  return { text, endIndex: k };
+}
+
+// A comment on the flagged line or the two lines above it (the deliberate
+// full-table-clear / ignore_permissions comment rule).
+function hasNearbyComment(lines, i) {
+  return /#/.test(lines[i] || '') || (i > 0 && /#/.test(lines[i - 1])) || (i > 1 && /#/.test(lines[i - 2]));
+}
+
+// Small edit-distance helper for FR-053 (misspelled lifecycle names).
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+// Lifecycle method names the framework actually calls (B33's list).
+const VALID_LIFECYCLE = new Set([
+  'before_validate', 'validate', 'before_save', 'before_submit', 'before_cancel',
+  'before_update_after_submit', 'on_update', 'on_submit', 'on_cancel',
+  'on_update_after_submit', 'on_change', 'before_insert', 'after_insert',
+  'on_trash', 'after_delete', 'before_rename', 'after_rename', 'autoname',
+  'before_naming', 'onload', 'before_print', 'before_discard', 'on_discard',
+]);
+// Known wrong names that look like lifecycle methods but are never called.
+const WRONG_LIFECYCLE = new Set([
+  'after_save', 'before_delete', 'on_saved', 'after_submit', 'before_load', 'on_submitted',
+]);
+function isLifecycleName(name) {
+  return VALID_LIFECYCLE.has(name);
+}
+function isWrongLifecycleName(name) {
+  if (WRONG_LIFECYCLE.has(name)) return true;
+  if (VALID_LIFECYCLE.has(name)) return false;
+  for (const valid of VALID_LIFECYCLE) {
+    if (levenshtein(name, valid) <= 2) return true;
+  }
+  return false;
 }
 
 // --- JS helper: name of the form handler enclosing a line index ---------
@@ -271,6 +349,65 @@ export function checkFiles(files, rulesInput) {
     pyAlias.set(f.path, aliases);
   }
 
+  // --- Module index for FR-056 (dotted-path resolution) --------------
+  // dotted module name -> { file, defs:Set, classes:Set }. Built from every
+  // submitted .py file EXCEPT hooks.py (a hook function defined in hooks.py
+  // itself is resolved through the hooks.py entry added below). A lone
+  // hooks.py with no other .py files leaves the index with only hooks.py,
+  // and FR-056 is skipped in that case — a single-file paste cannot
+  // resolve dotted paths.
+  const pyModuleIndex = new Map();
+  const pyTopSegments = new Set();
+  function dottedNamesForPath(p) {
+    let segs = p.replace(/^\//, '').split('/');
+    if (segs[0] === 'apps') segs = segs.slice(2);
+    let last = segs[segs.length - 1].replace(/\.py$/i, '');
+    if (last === '__init__') segs = segs.slice(0, -1);
+    else segs[segs.length - 1] = last;
+    const names = [segs.join('.')];
+    if (segs.length > 1) names.push(segs.slice(1).join('.'));
+    if (segs.length > 2 && segs[1] === segs[0]) names.push(segs.slice(2).join('.'));
+    return names.filter(Boolean);
+  }
+  for (const f of input) {
+    if (!isPy(f.path)) continue;
+    const fns = parsePyFunctions(linesOf(f.content || ''));
+    const defs = new Set(fns.map((fn) => fn.name));
+    const classes = new Set();
+    for (const line of linesOf(f.content || '')) {
+      const cm = /^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(line);
+      if (cm) classes.add(cm[1]);
+    }
+    for (const dotted of dottedNamesForPath(f.path)) {
+      if (!pyModuleIndex.has(dotted)) pyModuleIndex.set(dotted, { file: f.path, defs, classes });
+      pyTopSegments.add(dotted.split('.')[0]);
+    }
+  }
+  // Does dotted path `dotted` resolve against the submitted files?
+  // 'skip' = unverifiable (another app's module, or no other files).
+  function resolveDotted(dotted) {
+    const first = dotted.split('.')[0];
+    if (['frappe', 'erpnext', 'hrms', 'crm', 'helpdesk'].includes(first)) return 'skip';
+    if (!pyTopSegments.has(first)) return 'skip';
+    if (pyModuleIndex.has(dotted)) return true;
+    const lastDot = dotted.lastIndexOf('.');
+    if (lastDot === -1) return false;
+    const mod = dotted.slice(0, lastDot);
+    const name = dotted.slice(lastDot + 1);
+    const entry = pyModuleIndex.get(mod);
+    if (!entry) return false;
+    return entry.defs.has(name) || entry.classes.has(name);
+  }
+  // Is a quoted string a dotted-path candidate? Dots, no spaces/slashes,
+  // identifier segments, not a version number or a file name.
+  function isDottedPathCandidate(s) {
+    if (!s.includes('.') || /[\s/@]/.test(s) || /\.(py|js|html|json|md|txt|css)$/i.test(s)) return false;
+    const segs = s.split('.');
+    if (segs.length < 2) return false;
+    if (segs.every((g) => /^\d+$/.test(g))) return false; // version like 1.2.3
+    return segs.every((g) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(g));
+  }
+
   for (const file of input) {
     const path = file.path || '';
     const content = file.content || '';
@@ -326,6 +463,20 @@ export function checkFiles(files, rulesInput) {
             if (seenMethods.has(dm[1])) add('FR-006', path, i);
             else seenMethods.set(dm[1], i);
           }
+        }
+      }
+      // Lines inside a `with ... patch(` block (FR-050 exemption):
+      // unittest.mock.patch blocks replace framework attributes on purpose.
+      const inPatchWithBlock = new Set();
+      {
+        let patchIndent = null;
+        for (let pi = 0; pi < lines.length; pi++) {
+          const pl = lines[pi];
+          if (pl.trim() === '' || isCommentPy(pl)) continue;
+          const pind = indentOf(pl);
+          if (patchIndent !== null && pind <= patchIndent && pl.trim()) { patchIndent = null; }
+          if (/^\s*with\b.*\bpatch\s*\(/.test(pl)) { patchIndent = pind; continue; }
+          if (patchIndent !== null && pind > patchIndent) inPatchWithBlock.add(pi);
         }
       }
       // Per-line Python checks.
@@ -393,7 +544,46 @@ export function checkFiles(files, rulesInput) {
         if (/frappe\.db\.get_value\(\s*['"](?:Company|[^'"]*\sSettings)['"]/.test(line) && !/cache\s*=\s*True/.test(line)) add('FR-034', path, i);
         // FR-035: name-only list without pluck.
         if (/frappe\.get_all\(\s*[^)]*fields\s*=\s*\[\s*['"]name['"]\s*\]/.test(line) && !/pluck\s*=/.test(line)) add('FR-035', path, i);
-        // FR-042: eval() / exec() in Python code. Check the line with
+        // FR-057 — hooks.py must be static data. Handled below (outside-def
+      // scan), not in the per-line loop.
+      // FR-049 / FR-050 — per-line checks (ledger writes, monkey-patching).
+      {
+        const LEDGER = ['GL Entry', 'Stock Ledger Entry', 'Payment Ledger Entry', 'Bin', 'Serial and Batch Bundle'];
+        const ledgerHit = LEDGER.find((d) => line.includes(`"${d}"`) || line.includes(`'${d}'`));
+        if (ledgerHit) {
+          // A write on the same line as the ledger doctype name. Reads
+          // (get_value, get_list, get_all, a get_doc field read) do not fire.
+          if (/frappe\.db\.set_value\s*\(/.test(line) || /\.(insert|save|submit|delete)\s*\(/.test(line)
+            || /frappe\.(delete_doc|new_doc)\s*\(/.test(line) || /frappe\.get_doc\s*\(\s*\{/.test(line)) {
+            add('FR-049', path, i);
+          } else if (/frappe\.db\.sql\s*\(/.test(line) && /\b(insert|update|delete)\b/i.test(line)) {
+            add('FR-049', path, i);
+          }
+        }
+        // Raw SQL on a ledger table: `tabGL Entry` etc. with a write verb.
+        if (/\btab(?:GL Entry|Stock Ledger Entry|Payment Ledger Entry|Bin|Serial and Batch Bundle)\b/.test(line)
+          && /\b(insert|update|delete)\b/i.test(line) && !/\bselect\b/i.test(line)) {
+          add('FR-049', path, i);
+        }
+        // FR-050: assignment to an attribute of frappe / erpnext / hrms, or
+        // setattr() on one of them. frappe.local / frappe.conf /
+        // frappe.session are excluded (local state and FR-059 territory).
+        // Test files and unittest.mock.patch with-blocks are exempt.
+        const inTestFile = /(^|\/)(tests?)\//i.test(path) || /^test_/.test(base) || /_test\.py$/i.test(base);
+        if (!inTestFile && !inPatchWithBlock.has(i)) {
+          if (/\bsetattr\s*\(\s*(?:frappe|erpnext|hrms)\b/.test(line)) add('FR-050', path, i);
+          else {
+            const assign = /^\s*(frappe|erpnext|hrms)\.([A-Za-z_][A-Za-z0-9_.]*)\s*=(?!=)/.exec(line);
+            if (assign) {
+              const firstAttr = assign[2].split('.')[0];
+              if (!['local', 'conf', 'session'].includes(firstAttr)) add('FR-050', path, i);
+            }
+          }
+        }
+        // FR-059 (b): direct assignment to frappe.session.user.
+        if (/frappe\.session\.user\s*=(?!=)/.test(line)) add('FR-059', path, i);
+      }
+      // FR-042: eval() / exec() in Python code. Check the line with
         // string literals removed, so a message mentioning eval does not
         // flag; a real call still does.
         if (/\b(?:eval|exec)\s*\(/.test(stripStrings(line))) add('FR-042', path, i);
@@ -477,6 +667,139 @@ export function checkFiles(files, rulesInput) {
           }
           if (!/\bqueue\s*=/.test(callText)) add('FR-043', path, i);
           i = k; // skip the joined continuation lines
+        }
+      }
+      // FR-044 / FR-045 / FR-046 / FR-047 / FR-048 / FR-052 — call-site
+      // checks that need a whole (possibly multi-line) call, not one line.
+      {
+        // FR-044: shell execution from app code.
+        for (let i = 0; i < lines.length; i++) {
+          if (isCommentPy(lines[i])) continue;
+          const code = stripStrings(lines[i]);
+          if (/\bos\.system\s*\(/.test(code) || /\bos\.popen\s*\(/.test(code)
+            || /frappe\.utils\.execute_in_shell\s*\(/.test(code)) {
+            add('FR-044', path, i);
+            continue;
+          }
+          const subIdx = code.search(/\bsubprocess\.\w+\s*\(/);
+          if (subIdx !== -1) {
+            const { text, endIndex } = joinCallText(lines.map(stripStrings), i, subIdx);
+            if (/\bshell\s*=\s*True\b/.test(text)) add('FR-044', path, i);
+            i = endIndex;
+          }
+        }
+        // FR-045: unsafe deserialization.
+        for (let i = 0; i < lines.length; i++) {
+          if (isCommentPy(lines[i])) continue;
+          const code = stripStrings(lines[i]);
+          if (/\b(?:pickle|marshal|dill)\.loads?\s*\(/.test(code)
+            || /\bshelve\.open\s*\(/.test(code) || /\bjsonpickle\.decode\s*\(/.test(code)) {
+            add('FR-045', path, i);
+            continue;
+          }
+          const yIdx = code.search(/\byaml\.load\s*\(/);
+          if (yIdx !== -1) {
+            const { text, endIndex } = joinCallText(lines.map(stripStrings), i, yIdx);
+            if (!/SafeLoader/.test(text)) add('FR-045', path, i);
+            i = endIndex;
+          }
+        }
+        // FR-046: SSTI — render_template / render_jinja / Template with a
+        // non-literal first argument. A literal string first argument is
+        // safe; a variable, attribute, call or f-string is the template
+        // itself coming from data. String literals are stripped first, so
+        // a literal first argument shows up as '' (still a quote) while a
+        // message mentioning render_template does not flag.
+        for (let i = 0; i < lines.length; i++) {
+          if (isCommentPy(lines[i])) continue;
+          const stripped = lines.map(stripStrings);
+          const m = /(?:frappe\.)?render_template\s*\(|(?:frappe\.)?render_jinja\s*\(|(?:jinja2\.)?Template\s*\(/.exec(stripped[i]);
+          if (!m) continue;
+          const { text, endIndex } = joinCallText(stripped, i, m.index);
+          const afterOpen = text.slice(text.indexOf('(') + 1).trimStart();
+          // A keyword first argument (template=...) counts too.
+          const argText = afterOpen.replace(/^template\s*=\s*/, '');
+          if (!/^['"]/.test(argText)) add('FR-046', path, i);
+          i = endIndex;
+        }
+        // FR-047: delete / truncate with no filter. A comment on the line
+        // or the two lines above it (a deliberate full-table clear, e.g.
+        // log rotation) exempts the call — same comment rule as FR-025.
+        for (let i = 0; i < lines.length; i++) {
+          if (isCommentPy(lines[i])) continue;
+          const code = lines[i];
+          if (/frappe\.db\.truncate\s*\(/.test(code)) {
+            if (!hasNearbyComment(lines, i)) add('FR-047', path, i);
+            continue;
+          }
+          const delIdx = code.search(/frappe\.db\.delete\s*\(/);
+          if (delIdx !== -1) {
+            const { text, endIndex } = joinCallText(lines, i, delIdx);
+            // Split the call's top-level arguments (depth-aware).
+            const inner = text.slice(text.indexOf('(') + 1, text.lastIndexOf(')'));
+            const args = [];
+            let depth = 0;
+            let cur = '';
+            for (const ch of inner) {
+              if (ch === '(' || ch === '[' || ch === '{') depth++;
+              if (ch === ')' || ch === ']' || ch === '}') depth--;
+              if (ch === ',' && depth === 0) { args.push(cur); cur = ''; } else cur += ch;
+            }
+            args.push(cur);
+            const second = (args[1] || '').trim();
+            if (args.length < 2 || second === '' || second === '{}' || /^[A-Za-z_][A-Za-z0-9_]*$/.test(second)) {
+              if (!hasNearbyComment(lines, i)) add('FR-047', path, i);
+            }
+            i = endIndex;
+            continue;
+          }
+          // Raw DELETE / TRUNCATE in frappe.db.sql with no WHERE.
+          const sqlIdx = code.search(/frappe\.db\.sql\s*\(/);
+          if (sqlIdx !== -1) {
+            const { text, endIndex } = joinCallText(lines, i, sqlIdx);
+            if (/\bdelete\s+from\b/i.test(text) || /\btruncate\b/i.test(text)) {
+              if (!/\bwhere\b/i.test(text) && !hasNearbyComment(lines, i)) add('FR-047', path, i);
+            }
+            i = endIndex;
+          }
+        }
+        // FR-048: DDL in app code. Exempt inside a patch file (path
+        // containing /patches/) and inside a def named on_doctype_update.
+        {
+          const fns = parsePyFunctions(lines);
+          const inPatchFile = /(^|\/)patches\//.test(path);
+          const inOnDoctypeUpdate = (lineIdx) => fns.some((fn) => fn.name === 'on_doctype_update'
+            && lineIdx > fn.line && fn.bodyLines.some((b) => b.line === lineIdx));
+          for (let i = 0; i < lines.length; i++) {
+            if (isCommentPy(lines[i]) || inPatchFile || inOnDoctypeUpdate(i)) continue;
+            const code = lines[i];
+            if (/frappe\.db\.sql_ddl\s*\(/.test(code) || /\badd_index\s*\(/.test(code)
+              || /frappe\.db\.truncate\s*\(/.test(code)) {
+              add('FR-048', path, i);
+              continue;
+            }
+            const sqlIdx = code.search(/frappe\.db\.sql\s*\(/);
+            if (sqlIdx !== -1) {
+              const { text, endIndex } = joinCallText(lines, i, sqlIdx);
+              if (/\balter\s+table\b/i.test(text) || /\bcreate\s+table\b/i.test(text)
+                || /\bcreate\s+index\b/i.test(text) || /\bdrop\s+table\b/i.test(text)) {
+                add('FR-048', path, i);
+              }
+              i = endIndex;
+            }
+          }
+        }
+        // FR-052: frappe.qb.get_query without ignore_permissions=False.
+        // String literals are stripped first, so a message mentioning
+        // get_query does not flag.
+        for (let i = 0; i < lines.length; i++) {
+          if (isCommentPy(lines[i])) continue;
+          const stripped = lines.map(stripStrings);
+          const m = /(?:frappe\.qb|qb)\.get_query\s*\(/.exec(stripped[i]);
+          if (!m) continue;
+          const { text, endIndex } = joinCallText(stripped, i, m.index);
+          if (!/ignore_permissions\s*=\s*False\b/.test(text)) add('FR-052', path, i);
+          i = endIndex;
         }
       }
       // FR-023 / FR-024 / FR-033 — per whitelisted function.
@@ -565,6 +888,91 @@ export function checkFiles(files, rulesInput) {
             // FR-038: overridden validate() without super().validate().
             if (!/super\(\)\.validate\s*\(/.test(bodyText)) add('FR-038', path, fn.line);
           }
+          // FR-053: a misspelled lifecycle method name in a controller
+          // class. Ordinary helper methods with unrelated names do not
+          // fire — only known wrong names and near-misses (edit distance
+          // <= 2) of a real lifecycle name.
+          if (isWrongLifecycleName(fn.name)) add('FR-053', path, fn.line);
+        }
+      }
+      // FR-051 / FR-054 / FR-055 / FR-058 / FR-059 — per-function checks.
+      {
+        const fns = parsePyFunctions(lines);
+        for (const fn of fns) {
+          const bodyText = fn.bodyLines.map((b) => b.text).join('\n');
+          const isLifecycle = !!fn.isDocumentClass && isLifecycleName(fn.name);
+          const isWhitelisted = /frappe\.whitelist/.test(fn.decorator);
+          // FR-051: enqueue in a lifecycle method or whitelisted method
+          // without enqueue_after_commit=True. String literals are
+          // stripped first, so a message mentioning enqueue does not flag.
+          if (isLifecycle || isWhitelisted) {
+            const stripped = lines.map(stripStrings);
+            for (const b of fn.bodyLines) {
+              if (isCommentPy(b.text)) continue;
+              const m = /frappe\.enqueue(?:_doc)?\s*\(/.exec(stripped[b.line]);
+              if (!m) continue;
+              const { text } = joinCallText(stripped, b.line, m.index);
+              if (!/enqueue_after_commit\s*=\s*True\b/.test(text)) add('FR-051', path, b.line);
+            }
+          }
+          // FR-054: request state read inside a lifecycle method, or
+          // form_dict read inside any non-whitelisted function.
+          const requestRe = /frappe\.local\.(?:request|form_dict|response|request_ip)\b|frappe\.form_dict\b|frappe\.request\b/;
+          for (const b of fn.bodyLines) {
+            if (isCommentPy(b.text)) continue;
+            if (isLifecycle && requestRe.test(b.text)) { add('FR-054', path, b.line); continue; }
+            if (!isWhitelisted && /frappe\.(?:local\.)?form_dict\b/.test(b.text)) add('FR-054', path, b.line);
+          }
+          // FR-055: return with a value inside before_install. A bare
+          // return does not fire. A return with a comment on the same
+          // line — an intentional, stated refusal — is exempt.
+          if (fn.name === 'before_install') {
+            for (const b of fn.bodyLines) {
+              const ret = /^\s*return\b(.*)$/.exec(b.text);
+              if (!ret) continue;
+              const after = ret[1].replace(/#.*$/, '').trim();
+              if (after && !/#/.test(b.text)) add('FR-055', path, b.line);
+            }
+          }
+          // FR-058: raw-SQL UPDATE/INSERT/DELETE with no cache clear in
+          // the same function. set_value / save clear the cache
+          // themselves, so they never reach this check.
+          {
+            const hasClear = /frappe\.clear_document_cache\s*\(|frappe\.clear_cache\s*\(/.test(bodyText);
+            if (!hasClear) {
+              for (const b of fn.bodyLines) {
+                if (isCommentPy(b.text)) continue;
+                const sqlIdx = b.text.search(/frappe\.db\.sql\s*\(/);
+                if (sqlIdx === -1) continue;
+                const { text } = joinCallText(lines, b.line, b.text.indexOf('frappe.db.sql'));
+                if (/\b(update|insert\s+into|delete\s+from)\b/i.test(text)) add('FR-058', path, b.line);
+              }
+            }
+          }
+          // FR-059 (a): frappe.set_user( without restoration in a finally
+          // block that restores the user with another set_user( call.
+          {
+            const setUserLines = fn.bodyLines.filter((b) => !isCommentPy(b.text) && /frappe\.set_user\s*\(/.test(b.text));
+            if (setUserLines.length) {
+              // A finally block restores the user only if it contains a
+              // set_user( call after the finally: line.
+              let restored = false;
+              for (let k = 0; k < fn.bodyLines.length; k++) {
+                if (/^\s*finally\s*:/.test(fn.bodyLines[k].text)) {
+                  const finIndent = indentOf(fn.bodyLines[k].text);
+                  for (let j = k + 1; j < fn.bodyLines.length; j++) {
+                    const lb = fn.bodyLines[j];
+                    if (lb.text.trim() && indentOf(lb.text) <= finIndent) break;
+                    if (/frappe\.set_user\s*\(/.test(lb.text)) { restored = true; break; }
+                  }
+                }
+                if (restored) break;
+              }
+              if (!restored) {
+                for (const b of setUserLines) add('FR-059', path, b.line);
+              }
+            }
+          }
         }
       }
       // FR-039 / FR-040 — permission hooks in hooks.py only. A hook
@@ -578,9 +986,136 @@ export function checkFiles(files, rulesInput) {
             if (isCommentPy(b.text)) continue;
             // FR-039: throwing in a permission hook breaks ALL access.
             if (/frappe\.throw\s*\(/.test(b.text) || /^\s*raise\b/.test(b.text)) add('FR-039', path, b.line);
-            // FR-040: return True in has_permission grants nothing.
-            if (fn.name === 'has_permission' && /^\s*return\s+True\b/.test(b.text)) add('FR-040', path, b.line);
           }
+          // FR-040 (corrected 2026-11-27 — the old rule was inverted):
+          // a has_permission hook must return True explicitly for users
+          // it does not restrict. Frappe treats a missing return (None)
+          // as a denial, so a code path that falls through to None
+          // silently locks out every other user. Flag the hook when it
+          // has no `return True` at all, when it has a bare `return`,
+          // or when a path can fall through to the end of the function.
+          // "Ends" means the last top-level statement of the body: a
+          // return nested inside an if does not end the function — the
+          // code after the if still runs. An if/else chain where every
+          // branch ends in a return is safe (no fall-through path).
+          if (fn.name === 'has_permission') {
+            const body = fn.bodyLines.filter((b) => b.text.trim() !== '' && !isCommentPy(b.text));
+            const hasReturnTrue = body.some((b) => /^\s*return\s+True\b/.test(b.text));
+            const hasBareReturn = body.some((b) => /^\s*return\s*(#.*)?$/.test(b.text));
+            let endsWithReturn = false;
+            if (body.length) {
+              const bodyIndent = indentOf(body[0].text);
+              const top = body.filter((b) => indentOf(b.text) === bodyIndent);
+              const lastTop = top[top.length - 1];
+              if (/^\s*return\b/.test(lastTop.text)) {
+                endsWithReturn = true;
+              } else if (/^\s*if\b/.test(lastTop.text)) {
+                // Last top-level statement is an if-chain: safe only if
+                // the chain has an else and every branch ends in a
+                // return. Walk the chain (if/elif/else at body indent)
+                // and check each branch's last statement.
+                const chain = [];
+                let cur = null;
+                const chainLines = body.slice(body.indexOf(lastTop));
+                for (const b of chainLines) {
+                  if (indentOf(b.text) === bodyIndent && /^\s*(if|elif|else)\b/.test(b.text)) {
+                    cur = { kind: /^\s*else\b/.test(b.text) ? 'else' : 'if', last: null };
+                    chain.push(cur);
+                  } else if (cur && indentOf(b.text) > bodyIndent) {
+                    cur.last = b;
+                  }
+                }
+                const hasElse = chain.some((c) => c.kind === 'else');
+                const allReturn = chain.length > 0 && chain.every((c) => c.last && /^\s*return\b/.test(c.last.text));
+                if (hasElse && allReturn) endsWithReturn = true;
+              }
+            }
+            if (!hasReturnTrue || hasBareReturn || !endsWithReturn) add('FR-040', path, fn.line);
+          }
+        }
+        // FR-053 (b): bad doc_events keys in hooks.py — event names the
+        // framework never calls. Only lowercase snake_case keys are
+        // event names; DocType names ("Sales Order") and dotted-path
+        // values are excluded by the shape check.
+        {
+          let inDocEvents = false;
+          let depth = 0;
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (!inDocEvents) {
+              if (/doc_events\s*=/.test(line)) {
+                inDocEvents = true;
+                depth = (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+              } else continue;
+            } else {
+              depth += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+            }
+            const strRe = /['"]([^'"]+)['"]/g;
+            let sm;
+            while ((sm = strRe.exec(line)) !== null) {
+              const key = sm[1];
+              if (!/^[a-z][a-z0-9_]*$/.test(key)) continue;
+              if (isWrongLifecycleName(key)) add('FR-053', path, i);
+            }
+            if (depth <= 0) inDocEvents = false;
+          }
+        }
+        // FR-057: hooks.py must be static data. Any frappe.db / get_all /
+        // get_doc / get_installed_apps / frappe.local / frappe.conf call
+        // on a line outside any def computes a value at import time with
+        // the wrong site (or no site). An if / for / while at module
+        // level (indent 0) is the same mistake in control-flow form.
+        {
+          const fns = parsePyFunctions(lines);
+          const inDef = new Set();
+          for (const fn of fns) {
+            inDef.add(fn.line);
+            for (const b of fn.bodyLines) inDef.add(b.line);
+          }
+          for (let i = 0; i < lines.length; i++) {
+            if (isCommentPy(lines[i])) continue;
+            if (/^\s*(if|for|while)\b/.test(lines[i]) && indentOf(lines[i]) === 0) { add('FR-057', path, i); continue; }
+            if (!inDef.has(i) && /frappe\.(?:db|get_all|get_doc|get_meta|get_hooks|get_installed_apps|conf|local|flags)\b/.test(lines[i])) {
+              add('FR-057', path, i);
+            }
+          }
+        }
+      }
+      // FR-056 (hooks.py half): dotted paths in hooks.py must resolve
+      // against the submitted files. A lone hooks.py with no other .py
+      // files is skipped entirely — a single-file paste cannot resolve
+      // dotted paths. Paths to other apps (frappe., erpnext., ...) are
+      // skipped: those apps are not in the submission. The patches.txt
+      // half lives outside the isPy branch, below.
+      if (isHooks) {
+        const hasOtherPy = input.some((f) => isPy(f.path) && (f.path.split('/').pop() || '') !== 'hooks.py');
+        if (hasOtherPy) {
+          for (let i = 0; i < lines.length; i++) {
+            if (isCommentPy(lines[i])) continue;
+            const strRe = /['"]([^'"]+)['"]/g;
+            let sm;
+            while ((sm = strRe.exec(lines[i])) !== null) {
+              const dotted = sm[1];
+              if (!isDottedPathCandidate(dotted)) continue;
+              if (resolveDotted(dotted) === false) add('FR-056', path, i);
+            }
+          }
+        }
+      }
+    }
+
+    // FR-056 (patches.txt half): each non-comment, non-section,
+    // non-execute: line is a dotted path that must resolve.
+    if (base === 'patches.txt') {
+      const hasOtherPy = input.some((f) => isPy(f.path) && (f.path.split('/').pop() || '') !== 'hooks.py');
+      if (hasOtherPy) {
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line || line.startsWith('#') || line.startsWith('[')) continue;
+          if (/^execute\s*:/.test(line)) continue;
+          const dotted = line.split('#')[0].trim();
+          if (!isDottedPathCandidate(dotted)) continue;
+          if (resolveDotted(dotted) === false) add('FR-056', path, i);
         }
       }
     }

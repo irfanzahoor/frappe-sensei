@@ -1,10 +1,11 @@
 // Frappe Sensei — checker tests (plain Node, no npm install).
 // Run: node checker/checker.test.mjs
-// For EVERY rule (FR-001..FR-043) it runs a bad example (must produce
+// For EVERY rule (FR-001..FR-059) it runs a bad example (must produce
 // that ruleId) and a good example (must NOT produce that ruleId).
 // Bad/good snippets come from rules/rules.json where they are complete;
-// cross-file rules (FR-018, FR-019) and path-dependent rules (FR-002,
-// FR-007, FR-015) use constructed file sets, noted inline.
+// cross-file rules (FR-018, FR-019, FR-056) and path-dependent rules
+// (FR-002, FR-007, FR-015, FR-048, FR-057) use constructed file sets,
+// noted inline.
 // Exits non-zero on any failure.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +41,21 @@ function filesFor(id, kind) {
     case 'FR-004': case 'FR-005': case 'FR-012': case 'FR-020': case 'FR-021': case 'FR-028': case 'FR-041':
       return [js];
     case 'FR-039': case 'FR-040':
+      return [{ path: 'my_app/hooks.py', content }];
+    case 'FR-048':
+      return kind === 'bad'
+        ? [{ path: 'sales_order.py', content: bad }]
+        : [{ path: 'my_app/patches/v1_0/add_region_column.py', content: good }];
+    case 'FR-056':
+      // The bad example's dotted path must NOT resolve, so the target
+      // module file defines a different function; the good example's
+      // target file defines the handler the hooks.py path names.
+      return kind === 'bad'
+        ? [{ path: 'my_app/hooks.py', content: bad },
+           { path: 'my_app/handlers.py', content: 'def other(doc, method):\n    pass\n' }]
+        : [{ path: 'my_app/hooks.py', content: good },
+           { path: 'my_app/handlers.py', content: 'def notify(doc, method):\n    pass\n' }];
+    case 'FR-057':
       return [{ path: 'my_app/hooks.py', content }];
     case 'FR-007':
       return kind === 'bad'
@@ -342,6 +358,265 @@ for (const rule of rulesData.rules) {
     },
   ];
   for (const t of regression3) {
+    const result = checkFiles(t.files, rulesData);
+    const ok = has(result, t.id) === t.shouldHave;
+    if (ok) { passed++; console.log(`PASS ${t.name}`); }
+    else {
+      failed++;
+      failures.push(`${t.name}: expected ${t.id} ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
+      console.log(`FAIL ${t.name}: expected ${t.id} ${t.shouldHave ? 'to fire' : 'not to fire'} (got: ${result.findings.map((f) => f.ruleId).join(',') || 'none'})`);
+    }
+  }
+}
+
+// (Summary and exit are at the end of the file, after the last
+// regression block.)
+
+// Regression tests for the FR-040 correction and the frappe/skills rules
+// (FR-044 to FR-059, 2026-11-27): the exemptions and edge cases the
+// bad/good examples do not cover.
+{
+  const regression4 = [
+    {
+      name: 'FR-040 (a) hook with return True in one branch but fall-through at the end still fires',
+      files: [{ path: 'my_app/hooks.py', content: 'def has_permission(doc, ptype, user):\n    if doc.owner == user:\n        return True\n    if doc.status == "Draft":\n        return False\n' }],
+      id: 'FR-040', shouldHave: true,
+    },
+    {
+      name: 'FR-040 (b) hook with a bare return fires',
+      files: [{ path: 'my_app/hooks.py', content: 'def has_permission(doc, ptype, user):\n    if doc.status == "Closed":\n        return False\n    return\n' }],
+      id: 'FR-040', shouldHave: true,
+    },
+    {
+      name: 'FR-040 (c) hook returning False only (no return True) fires',
+      files: [{ path: 'my_app/hooks.py', content: 'def has_permission(doc, ptype, user):\n    if not meets_criteria(doc, user):\n        return False\n    return False\n' }],
+      id: 'FR-040', shouldHave: true,
+    },
+    {
+      name: 'FR-040 (d) permission_query_conditions is not checked by FR-040 (only has_permission)',
+      files: [{ path: 'my_app/hooks.py', content: 'def permission_query_conditions(user):\n    return ""\n' }],
+      id: 'FR-040', shouldHave: false,
+    },
+    {
+      name: 'FR-044 (a) subprocess with shell=True fires',
+      files: [{ path: 'tasks.py', content: 'import subprocess\n\ndef run(cmd):\n    return subprocess.run(cmd, shell=True)\n' }],
+      id: 'FR-044', shouldHave: true,
+    },
+    {
+      name: 'FR-044 (b) subprocess list call without shell=True does not fire',
+      files: [{ path: 'tasks.py', content: 'import subprocess\n\ndef run(path):\n    return subprocess.run(["ls", path], shell=False)\n' }],
+      id: 'FR-044', shouldHave: false,
+    },
+    {
+      name: 'FR-044 (c) os.system mentioned in a string does not fire',
+      files: [{ path: 'tasks.py', content: 'msg = "never use os.system() here"\n' }],
+      id: 'FR-044', shouldHave: false,
+    },
+    {
+      name: 'FR-045 (a) yaml.load with SafeLoader does not fire',
+      files: [{ path: 'config.py', content: 'import yaml\n\ndef load(f):\n    return yaml.load(f, Loader=yaml.SafeLoader)\n' }],
+      id: 'FR-045', shouldHave: false,
+    },
+    {
+      name: 'FR-045 (b) yaml.load without SafeLoader fires',
+      files: [{ path: 'config.py', content: 'import yaml\n\ndef load(f):\n    return yaml.load(f)\n' }],
+      id: 'FR-045', shouldHave: true,
+    },
+    {
+      name: 'FR-046 (a) Template with a variable first argument fires',
+      files: [{ path: 'notify.py', content: 'from jinja2 import Template\n\ndef render(tpl):\n    return Template(tpl).render()\n' }],
+      id: 'FR-046', shouldHave: true,
+    },
+    {
+      name: 'FR-046 (b) Template with a literal first argument does not fire',
+      files: [{ path: 'notify.py', content: 'from jinja2 import Template\n\ndef render():\n    return Template("Hello {{ name }}").render(name="World")\n' }],
+      id: 'FR-046', shouldHave: false,
+    },
+    {
+      name: 'FR-047 (a) delete with a variable filter fires',
+      files: [{ path: 'cleanup.py', content: 'def clear(filters):\n    frappe.db.delete("Sync Log", filters)\n' }],
+      id: 'FR-047', shouldHave: true,
+    },
+    {
+      name: 'FR-047 (b) delete with an empty {} filter fires',
+      files: [{ path: 'cleanup.py', content: 'frappe.db.delete("Sync Log", {})\n' }],
+      id: 'FR-047', shouldHave: true,
+    },
+    {
+      name: 'FR-047 (c) delete with a comment (deliberate full-table clear) does not fire',
+      files: [{ path: 'cleanup.py', content: '# Log rotation: this table is meant to be cleared nightly\nfrappe.db.delete("Sync Log")\n' }],
+      id: 'FR-047', shouldHave: false,
+    },
+    {
+      name: 'FR-047 (d) raw DELETE with a WHERE clause does not fire',
+      files: [{ path: 'cleanup.py', content: 'frappe.db.sql("delete from `tabSync Log` where creation < %s", cutoff)\n' }],
+      id: 'FR-047', shouldHave: false,
+    },
+    {
+      name: 'FR-048 (a) ALTER TABLE inside frappe.db.sql fires',
+      files: [{ path: 'setup.py', content: 'frappe.db.sql("alter table `tabRoute` add column `region` varchar(140)")\n' }],
+      id: 'FR-048', shouldHave: true,
+    },
+    {
+      name: 'FR-048 (b) DDL inside on_doctype_update does not fire',
+      files: [{ path: 'sales_order.py', content: 'def on_doctype_update():\n    frappe.db.add_index("Sales Order", ["customer", "transaction_date"])\n' }],
+      id: 'FR-048', shouldHave: false,
+    },
+    {
+      name: 'FR-049 (a) set_value on Bin fires',
+      files: [{ path: 'stock.py', content: 'frappe.db.set_value("Bin", {"item_code": item}, "actual_qty", qty)\n' }],
+      id: 'FR-049', shouldHave: true,
+    },
+    {
+      name: 'FR-049 (b) get_value on Bin does not fire (read, not write)',
+      files: [{ path: 'stock.py', content: 'qty = frappe.db.get_value("Bin", {"item_code": item}, "actual_qty")\n' }],
+      id: 'FR-049', shouldHave: false,
+    },
+    {
+      name: 'FR-050 (a) setattr(frappe, ...) fires',
+      files: [{ path: 'setup.py', content: 'import frappe\n\nsetattr(frappe.utils, "get_site_name", my_get_site_name)\n' }],
+      id: 'FR-050', shouldHave: true,
+    },
+    {
+      name: 'FR-050 (b) assignment in a test file does not fire',
+      files: [{ path: 'tests/test_setup.py', content: 'import frappe\n\nfrappe.utils.get_site_name = fake_name\n' }],
+      id: 'FR-050', shouldHave: false,
+    },
+    {
+      name: 'FR-050 (c) frappe.local assignment does not fire',
+      files: [{ path: 'setup.py', content: 'import frappe\n\nfrappe.local.flags.in_setup = True\n' }],
+      id: 'FR-050', shouldHave: false,
+    },
+    {
+      name: 'FR-051 (a) enqueue_doc without enqueue_after_commit in on_submit fires',
+      files: [{ path: 'sales_order.py', content: 'from frappe.model.document import Document\n\nclass SalesOrder(Document):\n    def on_submit(self):\n        frappe.enqueue_doc("Sales Order", self.name, "send_confirmation")\n' }],
+      id: 'FR-051', shouldHave: true,
+    },
+    {
+      name: 'FR-051 (b) enqueue with enqueue_after_commit=True does not fire',
+      files: [{ path: 'sales_order.py', content: 'from frappe.model.document import Document\n\nclass SalesOrder(Document):\n    def on_submit(self):\n        frappe.enqueue("my_app.tasks.confirm", queue="long", enqueue_after_commit=True, name=self.name)\n' }],
+      id: 'FR-051', shouldHave: false,
+    },
+    {
+      name: 'FR-052 (a) get_query with ignore_permissions=True fires',
+      files: [{ path: 'report.py', content: 'query = frappe.qb.get_query("Item", ignore_permissions=True)\n' }],
+      id: 'FR-052', shouldHave: true,
+    },
+    {
+      name: 'FR-053 (a) on_submitted doc_events key in hooks.py fires',
+      files: [{ path: 'my_app/hooks.py', content: 'doc_events = {"Purchase Request": {"on_submitted": "my_app.buying.notify"}}\n' }],
+      id: 'FR-053', shouldHave: true,
+    },
+    {
+      name: 'FR-053 (b) on_submit doc_events key in hooks.py does not fire',
+      files: [{ path: 'my_app/hooks.py', content: 'doc_events = {"Purchase Request": {"on_submit": "my_app.buying.notify"}}\n' }],
+      id: 'FR-053', shouldHave: false,
+    },
+    {
+      name: 'FR-053 (c) before_load method in a controller fires',
+      files: [{ path: 'sales_order.py', content: 'from frappe.model.document import Document\n\nclass SalesOrder(Document):\n    def before_load(self):\n        self.setup()\n' }],
+      id: 'FR-053', shouldHave: true,
+    },
+    {
+      name: 'FR-053 (d) ordinary helper method check_total does not fire',
+      files: [{ path: 'sales_order.py', content: 'from frappe.model.document import Document\n\nclass SalesOrder(Document):\n    def validate(self):\n        super().validate()\n        self.check_total()\n\n    def check_total(self):\n        pass\n' }],
+      id: 'FR-053', shouldHave: false,
+    },
+    {
+      name: 'FR-053 (e) on_load (one letter off onload) fires',
+      files: [{ path: 'sales_order.py', content: 'from frappe.model.document import Document\n\nclass SalesOrder(Document):\n    def on_load(self):\n        pass\n' }],
+      id: 'FR-053', shouldHave: true,
+    },
+    {
+      name: 'FR-054 (a) form_dict in a non-whitelisted helper fires',
+      files: [{ path: 'api.py', content: 'def get_channel():\n    return frappe.form_dict.get("channel")\n' }],
+      id: 'FR-054', shouldHave: true,
+    },
+    {
+      name: 'FR-054 (b) form_dict in a whitelisted method does not fire',
+      files: [{ path: 'api.py', content: '@frappe.whitelist()\ndef get_channel():\n    return frappe.form_dict.get("channel")\n' }],
+      id: 'FR-054', shouldHave: false,
+    },
+    {
+      name: 'FR-055 (a) bare return in before_install does not fire',
+      files: [{ path: 'my_app/hooks.py', content: 'def before_install():\n    setup_defaults()\n    return\n' }],
+      id: 'FR-055', shouldHave: false,
+    },
+    {
+      name: 'FR-055 (b) return False with a comment (intentional refusal) does not fire',
+      files: [{ path: 'my_app/hooks.py', content: 'def before_install():\n    return False  # refuse: no Company exists yet\n' }],
+      id: 'FR-055', shouldHave: false,
+    },
+    {
+      name: 'FR-055 (c) return False without a comment fires',
+      files: [{ path: 'my_app/hooks.py', content: 'def before_install():\n    return False\n' }],
+      id: 'FR-055', shouldHave: true,
+    },
+    {
+      name: 'FR-056 (a) lone hooks.py does not fire (single-file paste cannot resolve)',
+      files: [{ path: 'my_app/hooks.py', content: 'doc_events = {"Sales Order": {"on_submit": "my_app.handlers.notify"}}\n' }],
+      id: 'FR-056', shouldHave: false,
+    },
+    {
+      name: 'FR-056 (b) unresolvable path in patches.txt fires',
+      files: [{ path: 'my_app/patches.txt', content: '[v1.0]\nmy_app.patches.v1_0.missing_fix\n' },
+        { path: 'my_app/patches/v1_0/other.py', content: 'def execute():\n    pass\n' }],
+      id: 'FR-056', shouldHave: true,
+    },
+    {
+      name: 'FR-056 (c) resolvable path in patches.txt does not fire',
+      files: [{ path: 'my_app/patches.txt', content: '[v1.0]\nmy_app.patches.v1_0.fix_x\n' },
+        { path: 'my_app/patches/v1_0/fix_x.py', content: 'def execute():\n    pass\n' }],
+      id: 'FR-056', shouldHave: false,
+    },
+    {
+      name: 'FR-056 (d) frappe.* path in hooks.py is skipped (other app, not submitted)',
+      files: [{ path: 'my_app/hooks.py', content: 'doc_events = {"Sales Order": {"on_submit": "frappe.utils.scheduler.enqueue"}}\n' },
+        { path: 'my_app/handlers.py', content: 'def notify(doc, method):\n    pass\n' }],
+      id: 'FR-056', shouldHave: false,
+    },
+    {
+      name: 'FR-057 (a) frappe.db call at module level in hooks.py fires',
+      files: [{ path: 'my_app/hooks.py', content: 'cron_time = frappe.db.get_single_value("MyApp Settings", "sync_cron")\n' }],
+      id: 'FR-057', shouldHave: true,
+    },
+    {
+      name: 'FR-057 (b) frappe.db call inside a def in hooks.py does not fire',
+      files: [{ path: 'my_app/hooks.py', content: 'def before_enable():\n    return frappe.db.get_single_value("MyApp Settings", "sync_cron")\n' }],
+      id: 'FR-057', shouldHave: false,
+    },
+    {
+      name: 'FR-058 (a) INSERT via db.sql without a cache clear fires',
+      files: [{ path: 'sync.py', content: 'def sync_item(name):\n    frappe.db.sql("insert into `tabItem` (name) values (%s)", name)\n' }],
+      id: 'FR-058', shouldHave: true,
+    },
+    {
+      name: 'FR-058 (b) SELECT via db.sql does not fire',
+      files: [{ path: 'sync.py', content: 'def get_items():\n    return frappe.db.sql("select name from `tabItem`", as_dict=True)\n' }],
+      id: 'FR-058', shouldHave: false,
+    },
+    {
+      name: 'FR-058 (c) frappe.clear_cache (not document) also exempts',
+      files: [{ path: 'sync.py', content: 'def sync_status(name):\n    frappe.db.sql("update `tabItem` set status=%s where name=%s", ("Active", name))\n    frappe.clear_cache(doctype="Item")\n' }],
+      id: 'FR-058', shouldHave: false,
+    },
+    {
+      name: 'FR-059 (a) frappe.session.user assignment fires',
+      files: [{ path: 'auth.py', content: 'def impersonate(user):\n    frappe.session.user = user\n' }],
+      id: 'FR-059', shouldHave: true,
+    },
+    {
+      name: 'FR-059 (b) set_user with a finally that restores does not fire',
+      files: [{ path: 'auth.py', content: 'def run_as_admin():\n    original = frappe.session.user\n    try:\n        frappe.set_user("Administrator")\n        create_invoice()\n    finally:\n        frappe.set_user(original)\n' }],
+      id: 'FR-059', shouldHave: false,
+    },
+    {
+      name: 'FR-059 (c) set_user in a try with no finally fires',
+      files: [{ path: 'auth.py', content: 'def run_as_admin():\n    try:\n        frappe.set_user("Administrator")\n        create_invoice()\n    except Exception:\n        pass\n' }],
+      id: 'FR-059', shouldHave: true,
+    },
+  ];
+  for (const t of regression4) {
     const result = checkFiles(t.files, rulesData);
     const ok = has(result, t.id) === t.shouldHave;
     if (ok) { passed++; console.log(`PASS ${t.name}`); }

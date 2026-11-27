@@ -1,5 +1,5 @@
 {
-  "description": "43 deterministic, statically checkable rules for the live /frappe-review web tool (MVP Phase 1 + 8 rules from the Impertio-Studio/Frappe_Claude_Skill_Package review, 2026-11-27). No rule runs code.",
+  "description": "59 deterministic, statically checkable rules for the live /frappe-review web tool (MVP Phase 1 + 8 rules from the Impertio-Studio/Frappe_Claude_Skill_Package review, 2026-11-27, + FR-040 corrected and 16 rules from the official frappe/skills review, 2026-11-27). No rule runs code.",
   "name": "frappe-sensei",
   "rules": [
     {
@@ -650,12 +650,12 @@
     },
     {
       "category": "security",
-      "description": "Throwing inside a has_permission or permission_query_conditions hook breaks all access to the DocType, including read access for users who should be allowed in \u2014 the hook must return False instead of raising.",
+      "description": "Throwing inside a has_permission or permission_query_conditions hook breaks all access to the DocType, including read access for users who should be allowed in \u2014 the hook must return False to deny and True for users it does not restrict.",
       "example_bad": "# hooks.py\ndef has_permission(doc, user, permission_type):\n    if doc.status == 'Locked':\n        frappe.throw(_('Document is locked'))",
-      "example_good": "# hooks.py\ndef has_permission(doc, user, permission_type):\n    if doc.status == 'Locked':\n        return False\n    return None",
-      "fix": "Never throw or raise in a permission hook; return False to deny and None to defer to the standard permission system.",
+      "example_good": "# hooks.py\ndef has_permission(doc, user, permission_type):\n    if doc.status == 'Locked':\n        return False\n    return True",
+      "fix": "Never throw or raise in a permission hook; return False to deny and True for users the hook does not restrict.",
       "id": "FR-039",
-      "pattern": "Python check, hooks.py only: a frappe.throw() call or a raise statement inside a def named has_permission or permission_query_conditions.",
+      "pattern": "Python check, hooks.py only: a frappe.throw() call or a raise statement inside a def named has_permission or permission_query_conditions. A hook that ends with return None instead of return True is flagged by FR-040, not here.",
       "severity": "blocker",
       "source": "Impertio-Studio/Frappe_Claude_Skill_Package \u2014 skills/source/errors/frappe-errors-permissions/SKILL.md",
       "title": "frappe.throw() or raise inside a permission hook",
@@ -667,15 +667,15 @@
     },
     {
       "category": "security",
-      "description": "A has_permission hook can only deny access \u2014 returning True grants nothing, so a hook that relies on it leaves the decision entirely to the standard permission checks and the author's intent is lost.",
-      "example_bad": "# hooks.py\ndef has_permission(doc, ptype, user):\n    if user == doc.owner:\n        return True",
-      "example_good": "# hooks.py\ndef has_permission(doc, ptype, user):\n    if user == doc.owner:\n        return None\n    if not meets_criteria(doc, user):\n        return False\n    return None",
-      "fix": "Return None to let the standard permission system decide, and False to deny; never return True.",
+      "description": "A has_permission hook in hooks.py must end with an explicit return True for users the hook does not restrict. Frappe treats a missing return (None) as a denial, so a hook that only returns False in one branch silently locks out every other user.",
+      "example_bad": "# hooks.py\ndef has_permission(doc, ptype, user):\n    if ptype in ('write', 'delete') and doc.status == 'Closed':\n        return False",
+      "example_good": "# hooks.py\ndef has_permission(doc, ptype, user):\n    if ptype in ('write', 'delete') and doc.status == 'Closed':\n        return False\n    return True",
+      "fix": "End every has_permission hook with an explicit return True for users the hook does not restrict; return False only to deny.",
       "id": "FR-040",
-      "pattern": "Python check, hooks.py only: a return True statement inside a def named has_permission.",
+      "pattern": "Python check, hooks.py only: a def named has_permission whose body contains no return True at all, or contains a bare return, or whose last statement is not a return \u2014 i.e. a code path that can fall through to None. Frappe treats None as a denial, so the hook must return True explicitly for unrestricted users.",
       "severity": "major",
-      "source": "Impertio-Studio/Frappe_Claude_Skill_Package \u2014 skills/source/errors/frappe-errors-permissions/references/anti-patterns.md",
-      "title": "return True inside a has_permission hook",
+      "source": "frappe/skills \u2014 skills/frappe-app-dev/SKILL.md (Code section) + skills/deep-app-audit/quality/A-customization/A28-permission-hooks-only-narrow.md",
+      "title": "has_permission hook that can fall through to None",
       "versions": [
         "v14",
         "v15",
@@ -727,6 +727,278 @@
       "severity": "minor",
       "source": "Impertio-Studio/Frappe_Claude_Skill_Package \u2014 skills/source/impl/frappe-impl-scheduler/SKILL.md",
       "title": "frappe.enqueue() without queue=",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "Running a shell command from app code with os.system, os.popen, subprocess with shell=True, or frappe.utils.execute_in_shell hands a shell string to the OS. If any part of that string comes from a document, a request or a file name, it is command injection.",
+      "example_bad": "import os\n\ndef archive(path):\n    os.system('tar -czf backup.tgz ' + path)",
+      "example_good": "import subprocess\n\ndef archive(path):\n    subprocess.run(['tar', '-czf', 'backup.tgz', path], shell=False)",
+      "fix": "Use subprocess.run with a list of arguments and shell=False, or a framework API; never build a shell string from user or document data.",
+      "id": "FR-044",
+      "pattern": "Python check: os.system( or os.popen( or frappe.utils.execute_in_shell( anywhere, or a subprocess.* call whose arguments contain shell=True (multi-line calls joined before checking).",
+      "severity": "blocker",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/B-injection/B08-command-shell-injection.md",
+      "title": "Shell command built from app code (os.system / subprocess shell=True)",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "pickle.loads, yaml.load without SafeLoader, marshal, dill and shelve rebuild Python objects from a byte stream. Data from a file, a request or a stored field can carry a crafted payload that runs code while it is being loaded.",
+      "example_bad": "import pickle\n\ndef load_state(raw):\n    return pickle.loads(raw)",
+      "example_good": "import json\n\ndef load_state(raw):\n    return json.loads(raw)",
+      "fix": "Use json.loads / frappe.parse_json for data, or yaml.load with Loader=yaml.SafeLoader. Never unpickle data you did not create yourself.",
+      "id": "FR-045",
+      "pattern": "Python check: pickle.load(s)(, marshal.load(s)(, dill.load(s)(, shelve.open( or jsonpickle.decode( anywhere; yaml.load( only when the call does not pass SafeLoader.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/B-injection/B10-header-log-ldap-redis-deserialization.md",
+      "title": "Unsafe deserialization (pickle / yaml.load / marshal / dill / shelve)",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "frappe.render_template, render_jinja or jinja2.Template compiles its first argument as a Jinja template. If that argument is a document field, a request value or a formatted string instead of a literal, anyone who can write the field can run code on the server.",
+      "example_bad": "html = frappe.render_template(doc.message, {'doc': doc})",
+      "example_good": "html = frappe.render_template('templates/welcome.html', {'doc': doc})",
+      "fix": "Pass a literal template path or string to render_template; render user-controlled content as data with |e, never as the template itself.",
+      "id": "FR-046",
+      "pattern": "Python check: a frappe.render_template( / render_template( / frappe.render_jinja( / jinja2.Template( call whose first argument is not a string literal (a variable, attribute, call or f-string). A literal first argument is safe and does not fire. Different from FR-027, which is about escaping data inside a template.",
+      "severity": "blocker",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/B-injection/B05-ssti-jinja-templates.md",
+      "title": "Server-side template injection (render_template with a non-literal template)",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "frappe.db.delete with no filter, with an empty dict, or with a filter variable a caller can leave empty deletes every row of the table. frappe.db.truncate always clears the whole table. A raw DELETE or TRUNCATE without a WHERE clause does the same.",
+      "example_bad": "frappe.db.delete('Sync Log')",
+      "example_good": "frappe.db.delete('Sync Log', {'reference_name': reference_name})",
+      "fix": "Always pass a concrete filter to frappe.db.delete, and a WHERE clause to raw DELETE; use truncate only as a deliberate, commented full-table clear.",
+      "id": "FR-047",
+      "pattern": "Python check: frappe.db.delete( with a missing second argument, an empty {} filter, or a bare variable as the filter; frappe.db.truncate( anywhere; raw DELETE / TRUNCATE in frappe.db.sql with no WHERE in the statement. A comment on the line or the two lines above it (a deliberate full-table clear, e.g. log rotation) exempts the call \u2014 same comment rule as FR-025.",
+      "severity": "blocker",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/B-correctness/B21-destructive-call-needs-a-filter.md + skills/frappe-code-review/SKILL.md \u00a71",
+      "title": "Delete or truncate with no filter (whole table cleared)",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "CREATE, ALTER, DROP, TRUNCATE and add_index are DDL: the database commits the open transaction when they run, so a half-finished document save can be committed by accident. Schema changes belong in patches, not in request or lifecycle code.",
+      "example_bad": "frappe.db.sql_ddl(\"alter table `tabRoute` add column `region` varchar(140)\")",
+      "example_good": "# my_app/patches/v1_0/add_region_column.py\ndef execute():\n    frappe.db.sql_ddl(\"alter table `tabRoute` add column `region` varchar(140)\")",
+      "fix": "Move schema changes into a patch (patches.txt + an execute() function) or into on_doctype_update; never run DDL from a whitelisted method or a lifecycle hook.",
+      "id": "FR-048",
+      "pattern": "Python check: frappe.db.sql_ddl(, frappe.db.add_index( / add_index(, frappe.db.truncate(, or a frappe.db.sql( call whose statement contains ALTER TABLE / CREATE TABLE / CREATE INDEX / DROP TABLE, outside a patch file (path containing /patches/) and outside a def named on_doctype_update.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/B-correctness/B03-ddl-ends-the-transaction.md",
+      "title": "DDL in app code (sql_ddl / ALTER / CREATE / DROP / add_index / truncate)",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "Writing a GL Entry, Stock Ledger Entry, Payment Ledger Entry, Bin or Serial and Batch Bundle row directly \u2014 by insert, save, set_value, delete or raw SQL \u2014 bypasses the posting logic that keeps the ledgers consistent. A deleted or hand-edited ledger row breaks every report built on it.",
+      "example_bad": "frappe.db.set_value('GL Entry', name, 'status', 'Cancelled')",
+      "example_good": "entry = frappe.db.get_value('GL Entry', name, 'status')",
+      "fix": "Never write ledger rows directly. Post, cancel or amend through the source document (Sales Invoice, Stock Entry, Payment Entry) and let the framework write the ledger.",
+      "id": "FR-049",
+      "pattern": "Python check: a write call (set_value, insert, save, submit, delete, delete_doc, new_doc, or a get_doc dict-creation form) on the same line as a quoted 'GL Entry', 'Stock Ledger Entry', 'Payment Ledger Entry', 'Bin' or 'Serial and Batch Bundle', or raw SQL with INSERT/UPDATE/DELETE on `tabGL Entry` / `tabStock Ledger Entry` / `tabBin` etc. Reads (get_value, get_list, get_all, a get_doc field read) do not fire.",
+      "severity": "blocker",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/A-customization/A41-no-direct-ledger-writes.md",
+      "title": "Direct write to a ledger doctype (GL Entry / Stock Ledger / Bin / ...)",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "Assigning an attribute on frappe, erpnext or hrms (or setattr on one of them) replaces framework code for the whole process. The patch silently breaks on the next framework upgrade, and it changes behaviour for every app on the site, not just this one.",
+      "example_bad": "import frappe\n\nfrappe.utils.get_site_name = my_get_site_name",
+      "example_good": "import frappe\n\ndef get_site_name():\n    return frappe.utils.get_site_name()",
+      "fix": "Do not assign attributes on frappe, erpnext or hrms. Use a hook, an override module, or a wrapper function in your own app instead.",
+      "id": "FR-050",
+      "pattern": "Python check: an assignment whose left-hand side starts with frappe. / erpnext. / hrms. (excluding frappe.local, frappe.conf and frappe.session, which FR-059 covers), or a setattr(frappe|erpnext|hrms, ...) call. Assignments in test files and inside a unittest.mock.patch with-block are exempt.",
+      "severity": "blocker",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/A-customization/A01-no-monkey-patching.md",
+      "title": "Monkey-patching frappe / erpnext / hrms at import time",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "A job enqueued from inside a document save or a whitelisted method can run before the transaction commits, so it reads the old document \u2014 or no document at all if the save then fails.",
+      "example_bad": "@frappe.whitelist()\ndef build_pick_list(name):\n    frappe.enqueue('my_app.tasks.build_pick_list', queue='long', name=name)",
+      "example_good": "@frappe.whitelist()\ndef build_pick_list(name):\n    frappe.enqueue('my_app.tasks.build_pick_list', queue='long', enqueue_after_commit=True, name=name)",
+      "fix": "Pass enqueue_after_commit=True to every frappe.enqueue() / enqueue_doc() called from a lifecycle method or a whitelisted method.",
+      "id": "FR-051",
+      "pattern": "Python check: a frappe.enqueue( or frappe.enqueue_doc( call inside a DocType lifecycle method or a @frappe.whitelist() function whose arguments contain no enqueue_after_commit=True (multi-line calls joined before checking). Complements FR-043, which is about the missing queue= keyword.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/B-correctness/B04-enqueue-after-commit.md",
+      "title": "frappe.enqueue() in a lifecycle or whitelisted method without enqueue_after_commit=True",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "frappe.qb.get_query defaults to ignore_permissions=True, so a query built from it returns rows the current user is not allowed to see. In user-facing code that is a permission bypass.",
+      "example_bad": "query = frappe.qb.get_query('Item', fields=['name'])",
+      "example_good": "query = frappe.qb.get_query('Item', fields=['name'], ignore_permissions=False)",
+      "fix": "Pass ignore_permissions=False to frappe.qb.get_query in user-facing code, or use frappe.get_list, which applies permissions.",
+      "id": "FR-052",
+      "pattern": "Python check: a frappe.qb.get_query( / qb.get_query( call whose arguments contain no ignore_permissions=False (multi-line calls joined before checking). An explicit ignore_permissions=True also fires.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/frappe-app-dev/SKILL.md (Code section) + skills/deep-app-audit/security/B-injection/B03-query-builder-misuse.md",
+      "title": "frappe.qb.get_query() without ignore_permissions=False",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "The framework calls a fixed set of controller method names. A method named after_save, before_delete, on_saved, after_submit or before_load is never called \u2014 the customization looks installed and does nothing, with no warning.",
+      "example_bad": "class PurchaseRequest(Document):\n    def after_save(self):\n        notify_buyer(self)",
+      "example_good": "class PurchaseRequest(Document):\n    def on_update(self):\n        notify_buyer(self)",
+      "fix": "Rename the method to a lifecycle name the framework calls (on_update, on_submit, before_insert, after_insert, on_trash, after_delete, on_cancel, on_change, autoname, onload, ...), or rename it to a plain helper name and call it from a lifecycle method. The same applies to doc_events keys in hooks.py.",
+      "id": "FR-053",
+      "pattern": "Python check: a def in a DocType controller class whose name is a known wrong lifecycle name (after_save, before_delete, on_saved, after_submit, before_load, on_submitted) or is within edit distance 2 of a real lifecycle name without being one; plus a doc_events key in hooks.py that is a wrong or near-miss lifecycle name. Ordinary helper methods with unrelated names do not fire.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/B-correctness/B33-use-a-lifecycle-name-the-framework-calls.md",
+      "title": "Misspelled lifecycle method name (after_save / before_delete / on_saved ...)",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "frappe.local.request and frappe.form_dict exist only during a web request. Code in validate, on_update or a doc_events handler runs from background jobs, imports and patches too, where the request is empty \u2014 the rule silently reads nothing.",
+      "example_bad": "class SalesOrder(Document):\n    def validate(self):\n        super().validate()\n        self.source_channel = frappe.local.request.headers.get('X-Channel')",
+      "example_good": "@frappe.whitelist()\ndef set_channel(name, channel):\n    doc = frappe.get_doc('Sales Order', name)\n    frappe.has_permission('Sales Order', 'write', doc, throw=True)\n    doc.source_channel = channel\n    doc.save()",
+      "fix": "Read request data only in whitelisted methods and pass it in as an argument; lifecycle methods must work from the document alone.",
+      "id": "FR-054",
+      "pattern": "Python check: frappe.local.request / frappe.local.form_dict / frappe.local.response / frappe.local.request_ip / frappe.form_dict / frappe.request read inside a DocType lifecycle method, or frappe.form_dict / frappe.local.form_dict read inside any function that is not @frappe.whitelist()ed.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/B-correctness/B31-no-request-state-in-lifecycle-code.md",
+      "title": "Request state read inside a lifecycle method (frappe.local.request / form_dict)",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "apis",
+      "description": "install_app stops the whole install when a before_install hook returns a falsy value. A helper that ends with a call returning None or False aborts the install silently, on a site that may simply not have the data the check looked for.",
+      "example_bad": "def before_install():\n    return frappe.db.exists('Company', {'country': 'Atlantis'})",
+      "example_good": "def before_install():\n    if not frappe.db.exists('Company', {'country': 'Atlantis'}):\n        frappe.throw(_('Create an Atlantis company first'))",
+      "fix": "Never return a value from before_install; raise with frappe.throw if the install must stop, or return nothing at all.",
+      "id": "FR-055",
+      "pattern": "Python check: a return statement with a value inside a def named before_install (any .py file). A bare return does not fire. A return with a comment on the same line \u2014 an intentional, stated refusal \u2014 is exempt.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/A-customization/A39-install-hooks-return-nothing.md",
+      "title": "return with a value inside before_install",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "placement",
+      "description": "A dotted path in hooks.py or patches.txt that names a module or function the submitted code does not contain will fail at runtime \u2014 a renamed handler, a moved file, or a typo that nothing checks at install time.",
+      "example_bad": "# hooks.py\ndoc_events = {'Sales Order': {'on_submit': 'my_app.missing.notify'}}",
+      "example_good": "# hooks.py\ndoc_events = {'Sales Order': {'on_submit': 'my_app.handlers.notify'}}",
+      "fix": "Fix the dotted path to a module and function that exist in the app, or submit the whole app so the checker can resolve it.",
+      "id": "FR-056",
+      "pattern": "Cross-file check: a quoted dotted path in hooks.py, or a non-comment line in patches.txt, whose module part does not match any submitted .py file (excluding hooks.py itself) or whose final name is not a def/class in that file. Paths starting with frappe. / erpnext. / hrms. / crm. / helpdesk. are skipped (other apps are not submitted). Needs the whole submission's file list; a lone hooks.py with no other files is skipped entirely.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/A-customization/A14-dotted-paths-must-resolve.md",
+      "title": "Dotted path in hooks.py / patches.txt does not resolve",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "placement",
+      "description": "hooks.py is imported once, before any site is selected. A frappe.db call, get_all, get_doc, get_installed_apps, frappe.local or frappe.conf read \u2014 or an if/for/while \u2014 at module level computes a value with the wrong site, or with no site at all, and caches it for every request after.",
+      "example_bad": "# hooks.py\nif 'hrms' in frappe.get_installed_apps():\n    doc_events = {'Employee': {'validate': 'my_app.hr.validate'}}",
+      "example_good": "# hooks.py\ndoc_events = {\n    'Sales Order': {\n        'on_submit': 'my_app.handlers.notify',\n    },\n}",
+      "fix": "Keep hooks.py to static data only. Move per-site conditions into the handler body, or into a before_enable hook.",
+      "id": "FR-057",
+      "pattern": "Python check, hooks.py only: a frappe.db / get_all / get_doc / get_meta / get_hooks / get_installed_apps / frappe.conf / frappe.local / frappe.flags call on a line outside any def, or an if / for / while statement at module level (indent 0). Different from FR-001/FR-003, which cover logic in hooks.py \u2014 this is about values computed at import time.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/A-customization/A24-hooks-py-is-static-data.md",
+      "title": "Database or site state read at module level in hooks.py",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "performance",
+      "description": "A raw UPDATE/INSERT/DELETE through frappe.db.sql changes the database but not the cached document, so the next read returns stale data. set_value and save clear the cache themselves; a raw write must clear it by hand.",
+      "example_bad": "def sync_status(name):\n    frappe.db.sql(\"update `tabItem` set status='Active' where name=%s\", name)",
+      "example_good": "def sync_status(name):\n    frappe.db.sql(\"update `tabItem` set status='Active' where name=%s\", name)\n    frappe.clear_document_cache('Item', name)",
+      "fix": "Call frappe.clear_document_cache(doctype, name) \u2014 or frappe.clear_cache(doctype=...) \u2014 in the same function after a raw SQL write.",
+      "id": "FR-058",
+      "pattern": "Python check: a frappe.db.sql( call whose statement is an UPDATE, INSERT or DELETE, inside a function whose body contains no frappe.clear_document_cache or frappe.clear_cache call. set_value / save do not fire \u2014 they clear the cache themselves.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/quality/B-correctness/B43-clear-the-document-cache-after-a-raw-write.md",
+      "title": "Raw-SQL write without clearing the document cache",
+      "versions": [
+        "v14",
+        "v15",
+        "v16"
+      ]
+    },
+    {
+      "category": "security",
+      "description": "frappe.set_user changes who the rest of the request runs as. Without restoring the original user in a finally block, every line after the call \u2014 and every function it calls \u2014 runs as the wrong user. Assigning frappe.session.user directly does the same with no trace at all.",
+      "example_bad": "def run_as_admin():\n    frappe.set_user('Administrator')\n    create_invoice()",
+      "example_good": "def run_as_admin():\n    original = frappe.session.user\n    try:\n        frappe.set_user('Administrator')\n        create_invoice()\n    finally:\n        frappe.set_user(original)",
+      "fix": "Restore the original user in a finally block after every set_user, or use frappe.only_for / a permission check instead of switching users.",
+      "id": "FR-059",
+      "pattern": "Python check: a frappe.set_user( call in a function whose body has no finally block that restores the user with another set_user( call, or an assignment to frappe.session.user. Both fire at the offending line.",
+      "severity": "major",
+      "source": "frappe/skills \u2014 skills/deep-app-audit/security/D-auth-identity/D08-impersonation-set-user.md",
+      "title": "frappe.set_user() without restoration, or frappe.session.user assignment",
       "versions": [
         "v14",
         "v15",
